@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /** Store state machine: loading → ready/error, latest-wins, refresh. */
 import { describe, expect, it } from 'vitest'
-import { UsageStatsStore } from '../src/client/store.ts'
+import { TokenUsageStore } from '../src/client/store.ts'
 import type { StatsResponse } from '../src/shared/types.ts'
 
 const RESPONSE: StatsResponse = {
@@ -11,9 +11,9 @@ const RESPONSE: StatsResponse = {
   models: [], unpricedModels: [],
 }
 
-describe('UsageStatsStore', () => {
+describe('TokenUsageStore', () => {
   it('publishes ready with data on success', async () => {
-    const store = new UsageStatsStore(async (days) => ({ ...RESPONSE, days }))
+    const store = new TokenUsageStore(async (days) => ({ ...RESPONSE, days }))
     await store.load(15)
     const state = store.store.getSnapshot()
     expect(state.status).toBe('ready')
@@ -22,7 +22,7 @@ describe('UsageStatsStore', () => {
   })
 
   it('publishes error with message on failure', async () => {
-    const store = new UsageStatsStore(async () => { throw new Error('boom') })
+    const store = new TokenUsageStore(async () => { throw new Error('boom') })
     await store.load(7)
     const state = store.store.getSnapshot()
     expect(state.status).toBe('error')
@@ -32,7 +32,7 @@ describe('UsageStatsStore', () => {
   it('ignores stale responses (latest wins)', async () => {
     let resolveSlow!: (value: StatsResponse) => void
     const slow = new Promise<StatsResponse>((resolve) => { resolveSlow = resolve })
-    const store = new UsageStatsStore(async (days) => (days === 7 ? slow : { ...RESPONSE, days }))
+    const store = new TokenUsageStore(async (days) => (days === 7 ? slow : { ...RESPONSE, days }))
     const first = store.load(7)   // slow
     await store.load(30)          // fast — wins
     resolveSlow(RESPONSE)
@@ -45,7 +45,7 @@ describe('UsageStatsStore', () => {
 
   it('refresh re-fetches the current days', async () => {
     const calls: number[] = []
-    const store = new UsageStatsStore(async (days) => { calls.push(days); return { ...RESPONSE, days } })
+    const store = new TokenUsageStore(async (days) => { calls.push(days); return { ...RESPONSE, days } })
     await store.load(30)
     await store.refresh()
     expect(calls).toEqual([30, 30])
@@ -53,7 +53,7 @@ describe('UsageStatsStore', () => {
 
   it('serves a second load of the same window from cache without re-fetching', async () => {
     const calls: number[] = []
-    const store = new UsageStatsStore(async (days) => { calls.push(days); return { ...RESPONSE, days } })
+    const store = new TokenUsageStore(async (days) => { calls.push(days); return { ...RESPONSE, days } })
     await store.load(7)
     await store.load(7)
     expect(calls).toEqual([7])
@@ -63,7 +63,7 @@ describe('UsageStatsStore', () => {
   })
 
   it('a cached window renders instantly: no loading state on the switch', async () => {
-    const store = new UsageStatsStore(async (days) => ({ ...RESPONSE, days }))
+    const store = new TokenUsageStore(async (days) => ({ ...RESPONSE, days }))
     await store.load(15)
     const switchPromise = store.load(15)
     // The cache hit must publish before any await crosses the microtask queue.
@@ -73,7 +73,7 @@ describe('UsageStatsStore', () => {
 
   it('prefetch warms a window without touching the visible snapshot', async () => {
     const calls: number[] = []
-    const store = new UsageStatsStore(async (days) => { calls.push(days); return { ...RESPONSE, days } })
+    const store = new TokenUsageStore(async (days) => { calls.push(days); return { ...RESPONSE, days } })
     await store.load(7)
     await store.prefetch(30)
     // Snapshot still describes the visible window…
@@ -85,7 +85,7 @@ describe('UsageStatsStore', () => {
 
   it('a failed prefetch is silent and a later load retries', async () => {
     let failures = 1
-    const store = new UsageStatsStore(async (days) => {
+    const store = new TokenUsageStore(async (days) => {
       if (days === 30 && failures > 0) { failures -= 1; throw new Error('boom') }
       return { ...RESPONSE, days }
     })
@@ -98,7 +98,7 @@ describe('UsageStatsStore', () => {
   it('refresh bypasses the cache and updates it', async () => {
     const calls: number[] = []
     let version = 1
-    const store = new UsageStatsStore(async (days) => {
+    const store = new TokenUsageStore(async (days) => {
       calls.push(days)
       return { ...RESPONSE, days, generatedAt: version }
     })
@@ -111,7 +111,7 @@ describe('UsageStatsStore', () => {
 
   it('clearCache drops every window; the next load re-fetches', async () => {
     const calls: number[] = []
-    const store = new UsageStatsStore(async (days) => { calls.push(days); return { ...RESPONSE, days } })
+    const store = new TokenUsageStore(async (days) => { calls.push(days); return { ...RESPONSE, days } })
     await store.load(7)
     store.clearCache()
     await store.load(7)
@@ -120,7 +120,7 @@ describe('UsageStatsStore', () => {
 
   it('concurrent loads of the same window share one in-flight fetch', async () => {
     const calls: number[] = []
-    const store = new UsageStatsStore(async (days) => {
+    const store = new TokenUsageStore(async (days) => {
       calls.push(days)
       await new Promise(resolve => setTimeout(resolve, 5))
       return { ...RESPONSE, days }

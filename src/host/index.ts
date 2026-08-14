@@ -1,11 +1,11 @@
 /**
- * dsh-usage-stats host half: aggregates token usage from persisted session
+ * dsh-token-usage host half: aggregates token usage from persisted session
  * logs and serves it as JSON over a plugin-owned HTTP route.
  *
  * Session reads avoid the sessionQuery replay-validation path: live sessions
  * are read straight from the in-memory store (frozen events), and persisted
  * sessions are pruned by log file mtime before a direct persistence read.
- * @module dsh-usage-stats/host
+ * @module dsh-token-usage/host
  */
 
 import type { Context } from '@deepseek-ai/cordis'
@@ -25,7 +25,7 @@ import { createStatsHandler, type SessionSource } from './stats-route.ts'
 import { createPricesHandler, mergePrices } from './prices-route.ts'
 import type { Currency, ModelPrice } from '../shared/types.ts'
 
-export const name = 'dsh-usage-stats'
+export const name = 'dsh-token-usage'
 
 /** Host services this plugin depends on (sessions rides sessionQuery's own inject). */
 export const inject = ['llm', 'sessionQuery', 'webServer', 'sessions']
@@ -133,14 +133,14 @@ export function apply(ctx: Context, config: Config): void {
       res.end()
       return
     }
-    if (req.method === 'GET' && url.pathname === '/dsh-usage-stats/stats') return statsHandler(req, res)
-    if (req.method === 'POST' && url.pathname === '/dsh-usage-stats/prices') return pricesHandler(req, res)
+    if (req.method === 'GET' && url.pathname === '/dsh-token-usage/stats') return statsHandler(req, res)
+    if (req.method === 'POST' && url.pathname === '/dsh-token-usage/prices') return pricesHandler(req, res)
     res.writeHead(404)
     res.end()
   }
   ctx.effect(
-    () => ctx.webServer.register({ kind: 'prefix', path: '/dsh-usage-stats', handler: route }),
-    'dsh-usage-stats: stats and prices routes',
+    () => ctx.webServer.register({ kind: 'prefix', path: '/dsh-token-usage', handler: route }),
+    'dsh-token-usage: stats and prices routes',
   )
-  ctx.logger.info('dsh-usage-stats: host half loaded')
+  ctx.logger.info('dsh-token-usage: host half loaded')
 }

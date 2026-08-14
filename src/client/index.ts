@@ -1,11 +1,11 @@
 /**
- * dsh-usage-stats browser half: registers the Settings → Usage Stats section.
+ * dsh-token-usage browser half: registers the Settings → Usage Stats section.
  * The node half serves aggregated JSON; this half fetches, renders, and
  * persists edited model prices through the plugin's own write route (the
  * host's settings seam answers "settings-not-exposed" to web clients for
  * external-plugin namespaces, so the round-trip rides the plugin HTTP route
  * instead of the settings RPC).
- * @module dsh-usage-stats/client
+ * @module dsh-token-usage/client
  */
 
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
@@ -17,29 +17,29 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type { LocaleId } from '@deepseek-ai/dsh-client-locale/client'
 import { bindSnapshotSelector } from '@deepseek-ai/dsh-client-web-react'
-import { UsageStatsSection } from './UsageStatsSection.tsx'
-import type { UsageStatsSectionProps } from './UsageStatsSection.tsx'
-import { UsageStatsStore } from './store.ts'
-import type { UsageStatsState } from './store.ts'
-import { zh, en, type UsageStatsKey } from './locales.ts'
-import { injectUsageStatsCss } from './usage-stats.css.ts'
+import { TokenUsageSection } from './TokenUsageSection.tsx'
+import type { TokenUsageSectionProps } from './TokenUsageSection.tsx'
+import { TokenUsageStore } from './store.ts'
+import type { TokenUsageState } from './store.ts'
+import { zh, en, type TokenUsageKey } from './locales.ts'
+import { injectTokenUsageCss } from './token-usage.css.ts'
 import type { Currency, ModelPrice } from '../shared/types.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
-    /** The usage-stats page copy. */
-    'settings.usageStats': UsageStatsKey
+    /** The token-usage page copy. */
+    'settings.tokenUsage': TokenUsageKey
   }
 }
 
 /** Dictionary namespace owned by this plugin. */
-const NS = 'settings.usageStats'
+const NS = 'settings.tokenUsage'
 
 /** rc.6's LocaleDictOf types every dictionary value as string, but this
  * namespace ships function-valued keys (rangeDays, unpricedHint); the locale
  * runtime stores entries by value and functions pass through untouched, so
  * the contract is narrowed once at registration. */
-type UsageStatsDicts = Record<LocaleId, Record<UsageStatsKey, string>>
+type TokenUsageDicts = Record<LocaleId, Record<TokenUsageKey, string>>
 
 /** Every window the page offers; the store warms them all at activation. */
 const RANGES = [7, 15, 30] as const
@@ -47,18 +47,18 @@ const RANGES = [7, 15, 30] as const
 export const inject = ['slots', 'locale']
 
 export function apply(ctx: ClientContext): void {
-  ctx.effect(() => ctx.locale.register(NS, { zh, en } as unknown as UsageStatsDicts), 'dsh-usage-stats: copy dictionaries')
+  ctx.effect(() => ctx.locale.register(NS, { zh, en } as unknown as TokenUsageDicts), 'dsh-token-usage: copy dictionaries')
 
-  // One <style data-plugin="dsh-usage-stats"> tag, appended once (idempotent).
+  // One <style data-plugin="dsh-token-usage"> tag, appended once (idempotent).
   ctx.effect(() => {
-    injectUsageStatsCss()
+    injectTokenUsageCss()
     return () => {}
-  }, 'dsh-usage-stats: inject styles')
+  }, 'dsh-token-usage: inject styles')
 
-  const controller = new UsageStatsStore()
+  const controller = new TokenUsageStore()
   const bound = bindSnapshotSelector(controller.store)
-  const selectAll = (s: UsageStatsState): UsageStatsState => s
-  const useSnapshot = (): UsageStatsState => bound(selectAll)
+  const selectAll = (s: TokenUsageState): TokenUsageState => s
+  const useSnapshot = (): TokenUsageState => bound(selectAll)
   // Function-valued keys (rangeDays, unpricedHint) force the loose translate
   // signature on the section's `t` seat; the bound translate satisfies it.
   const t = ctx.locale.bind(NS) as (key: string) => any
@@ -67,7 +67,7 @@ export function apply(ctx: ClientContext): void {
   // over its resolved config and persists through the settings seam, then
   // busts the response caches so the next fetch reflects the new prices.
   const savePrices = async (currency: Currency, prices: Record<string, ModelPrice>): Promise<void> => {
-    const response = await fetch('/dsh-usage-stats/prices', {
+    const response = await fetch('/dsh-token-usage/prices', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ currency, prices }),
@@ -81,7 +81,7 @@ export function apply(ctx: ClientContext): void {
     }
   }
 
-  const injected = (): UsageStatsSectionProps => ({
+  const injected = (): TokenUsageSectionProps => ({
     controller,
     useSnapshot,
     t,
@@ -100,13 +100,13 @@ export function apply(ctx: ClientContext): void {
       if (days !== initial) void controller.prefetch(days)
     }
     return () => {}
-  }, 'dsh-usage-stats: initial stats load')
+  }, 'dsh-token-usage: initial stats load')
 
   ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section',
-    id: 'usage-stats',
+    id: 'token-usage',
     order: 20,
     label: () => t('nav'),
     inject: injected,
-  }, UsageStatsSection))
+  }, TokenUsageSection))
 }

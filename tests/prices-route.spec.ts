@@ -23,7 +23,7 @@ function post(deps: Partial<PricesDeps> = {}) {
 function reqOf(body: unknown, method = 'POST'): IncomingMessage {
   return {
     method,
-    url: '/dsh-usage-stats/prices',
+    url: '/dsh-token-usage/prices',
     [Symbol.asyncIterator]: async function* () { yield JSON.stringify(body) },
   } as unknown as IncomingMessage
 }
@@ -79,7 +79,7 @@ describe('createPricesHandler', () => {
 
   it('rejects malformed JSON with 400', async () => {
     const { handler, captured, calls } = post()
-    const req = { method: 'POST', url: '/dsh-usage-stats/prices', [Symbol.asyncIterator]: async function* () { yield 'not json' } } as unknown as IncomingMessage
+    const req = { method: 'POST', url: '/dsh-token-usage/prices', [Symbol.asyncIterator]: async function* () { yield 'not json' } } as unknown as IncomingMessage
     await handler(req, resOf(captured))
     expect(captured.status).toBe(400)
     expect(JSON.parse(captured.body).ok).toBe(false)

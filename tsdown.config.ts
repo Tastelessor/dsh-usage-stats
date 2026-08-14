@@ -12,7 +12,7 @@ export const PLATFORM_EXTERNALS = [
   '@deepseek-ai/dsh-client-runtime/client',
 ]
 
-const PLUGIN_ID = 'dsh-usage-stats'
+const PLUGIN_ID = 'dsh-token-usage'
 
 /** tsdown 0.9.9's Options omit `name`; the bundle name is carried for build reporting. */
 type BuildConfig = UserConfig & { name?: string }

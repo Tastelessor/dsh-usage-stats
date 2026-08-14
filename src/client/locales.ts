@@ -1,4 +1,4 @@
-/** Copy dictionaries for the usage-stats settings section. */
+/** Copy dictionaries for the token-usage settings section. */
 export const zh = {
   nav: '用量统计',
   rangeDays: (days: number) => `过去 ${days} 天`,
@@ -67,4 +67,4 @@ export const en = {
   error: 'Failed to load',
 } as const
 
-export type UsageStatsKey = keyof typeof zh
+export type TokenUsageKey = keyof typeof zh

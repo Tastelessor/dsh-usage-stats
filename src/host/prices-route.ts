@@ -1,5 +1,5 @@
 /**
- * HTTP handler for POST /dsh-usage-stats/prices. Persists the price editor's
+ * HTTP handler for POST /dsh-token-usage/prices. Persists the price editor's
  * per-currency overlay through the settings seam in-process.
  *
  * Web clients cannot write an external plugin's settings namespace directly:

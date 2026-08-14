@@ -1,5 +1,5 @@
 /**
- * Usage-stats page store: fetches the host aggregation JSON over the
+ * Token-usage page store: fetches the host aggregation JSON over the
  * plugin-owned route and publishes a uSES-safe snapshot. The fetcher is
  * injectable for tests; the default hits the same-origin endpoint.
  *
@@ -12,10 +12,10 @@
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import type { StatsResponse } from '../shared/types.ts'
 
-export type UsageStatsStatus = 'idle' | 'loading' | 'ready' | 'error'
+export type TokenUsageStatus = 'idle' | 'loading' | 'ready' | 'error'
 
-export interface UsageStatsState {
-  status: UsageStatsStatus
+export interface TokenUsageState {
+  status: TokenUsageStatus
   error: string | null
   days: number
   data: StatsResponse | null
@@ -23,8 +23,8 @@ export interface UsageStatsState {
 
 /** Default fetcher: same-origin GET, throws on non-2xx. */
 export async function defaultFetcher(days: number): Promise<StatsResponse> {
-  const response = await fetch(`/dsh-usage-stats/stats?days=${days}`, { credentials: 'same-origin' })
-  if (!response.ok) throw new Error(`usage stats fetch failed: HTTP ${response.status}`)
+  const response = await fetch(`/dsh-token-usage/stats?days=${days}`, { credentials: 'same-origin' })
+  if (!response.ok) throw new Error(`token usage fetch failed: HTTP ${response.status}`)
   return response.json() as Promise<StatsResponse>
 }
 
@@ -32,8 +32,8 @@ export async function defaultFetcher(days: number): Promise<StatsResponse> {
 const CACHE_TTL_MS = 30_000
 
 /** The page controller (one per settings surface). */
-export class UsageStatsStore {
-  readonly store: SnapshotStore<UsageStatsState> = createSnapshotStore<UsageStatsState>({
+export class TokenUsageStore {
+  readonly store: SnapshotStore<TokenUsageState> = createSnapshotStore<TokenUsageState>({
     status: 'idle',
     error: null,
     days: 7,

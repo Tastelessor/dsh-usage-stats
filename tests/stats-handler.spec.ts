@@ -28,7 +28,7 @@ function request(deps: Partial<StatsDeps> = {}, query = 'days=7') {
     now: () => NOW,
     ...deps,
   })
-  const req = { method: 'GET', url: `/dsh-usage-stats/stats?${query}` } as IncomingMessage
+  const req = { method: 'GET', url: `/dsh-token-usage/stats?${query}` } as IncomingMessage
   return { handler, captured, req }
 }
 
@@ -100,7 +100,7 @@ describe('createStatsHandler', () => {
 
   it('rejects non-GET with 405', async () => {
     const { handler, captured } = request()
-    await handler({ method: 'POST', url: '/dsh-usage-stats/stats' } as IncomingMessage, resOf(captured))
+    await handler({ method: 'POST', url: '/dsh-token-usage/stats' } as IncomingMessage, resOf(captured))
     expect(captured.status).toBe(405)
   })
 

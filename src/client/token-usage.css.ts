@@ -1,13 +1,13 @@
 /**
- * Usage-stats page styles as a self-contained module: exported CSS text plus
+ * Token-usage page styles as a self-contained module: exported CSS text plus
  * an idempotent injector, so the client bundle carries its own stylesheet
- * without any build-plugin magic. (A plain `import './usage-stats.css'`
+ * without any build-plugin magic. (A plain `import './token-usage.css'`
  * builds, but rolldown emits the sheet as a sibling `lib/client.css` that no
  * loader/host ever serves — the runtime bundle would be unstyled.)
  */
 
 export const css = `
-.usage-stats { display: flex; flex-direction: column; gap: 16px; padding: 16px 0; }
+.token-usage { display: flex; flex-direction: column; gap: 16px; padding: 16px 0; }
 .stats-toolbar { display: flex; gap: 8px; align-items: center; }
 .range-btn, .series-btn, .currency-btn { padding: 4px 10px; border: 1px solid var(--dsw-color-border, #d0d7de); border-radius: 6px; background: var(--dsw-surface-bg, #ffffff); color: var(--dsw-color-text, #1f2328); cursor: pointer; }
 .range-btn.active, .series-btn.active, .currency-btn.active { background: var(--dsw-color-accent, #2563eb); color: var(--dsw-color-text-inverse, #ffffff); border-color: var(--dsw-color-accent, #2563eb); }
@@ -43,10 +43,10 @@ export const css = `
 `
 
 /** Style-tag identity (mirrors the harness loader's `data-plugin` convention). */
-const TAG_ID = 'dsh-usage-stats'
+const TAG_ID = 'dsh-token-usage'
 
 /** Append the stylesheet once; no-ops when the tag is already present. */
-export function injectUsageStatsCss(): void {
+export function injectTokenUsageCss(): void {
   if (typeof document === 'undefined') return
   if (document.querySelector(`style[data-plugin-css="${TAG_ID}"]`) !== null) return
   const tag = document.createElement('style')

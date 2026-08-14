@@ -2,7 +2,7 @@
 /** Page renders charts, price table, empty state, range switching, tooltips, editing. */
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
-import { UsageStatsSection } from '../src/client/UsageStatsSection.tsx'
+import { TokenUsageSection } from '../src/client/TokenUsageSection.tsx'
 import { LineChart } from '../src/client/LineChart.tsx'
 import type { Currency, ModelPrice, StatsResponse } from '../src/shared/types.ts'
 
@@ -48,12 +48,12 @@ const t = (key: string): any => ({
 }[key] ?? key)
 
 const renderReady = (overrides: { onSavePrices?: (currency: Currency, prices: Record<string, ModelPrice>) => Promise<void> } = {}) => render(
-  <UsageStatsSection controller={{} as never}
+  <TokenUsageSection controller={{} as never}
     useSnapshot={() => ({ status: 'ready', error: null, days: 7, data: RESPONSE })} t={t}
     onSavePrices={overrides.onSavePrices ?? (async () => {})} />,
 )
 
-describe('UsageStatsSection', () => {
+describe('TokenUsageSection', () => {
   it('shows summary cards: totals, daily average, cache hit rate, both currencies', () => {
     renderReady()
     expect(screen.getByText('Token 总量')).toBeTruthy()
@@ -99,7 +99,7 @@ describe('UsageStatsSection', () => {
   })
 
   it('shows the empty state when there is no usage', () => {
-    render(<UsageStatsSection controller={{} as never}
+    render(<TokenUsageSection controller={{} as never}
       useSnapshot={() => ({ status: 'ready', error: null, days: 7,
         data: { ...RESPONSE, buckets: [], totals: { ...RESPONSE.totals, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, total: 0 }, amountCny: null, amountUsd: null, avgDailyTokens: 0 } } })}
       t={t} onSavePrices={async () => {}} />)
@@ -109,14 +109,14 @@ describe('UsageStatsSection', () => {
   it('calls load with the selected range', () => {
     let loaded: number[] = []
     const controller = { load: (days: number) => { loaded.push(days); return Promise.resolve() }, refresh: () => Promise.resolve() }
-    render(<UsageStatsSection controller={controller as never}
+    render(<TokenUsageSection controller={controller as never}
       useSnapshot={() => ({ status: 'ready', error: null, days: 7, data: RESPONSE })} t={t} onSavePrices={async () => {}} />)
     fireEvent.click(screen.getByText('过去 15 天'))
     expect(loaded).toEqual([15])
   })
 
   it('shows the error state with message', () => {
-    render(<UsageStatsSection controller={{} as never}
+    render(<TokenUsageSection controller={{} as never}
       useSnapshot={() => ({ status: 'error', error: 'boom', days: 7, data: null })} t={t} onSavePrices={async () => {}} />)
     expect(screen.getByText(/加载失败: boom/)).toBeTruthy()
   })

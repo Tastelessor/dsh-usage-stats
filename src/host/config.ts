@@ -20,25 +20,28 @@ export const DEFAULT_CURRENCY: Currency = 'CNY'
 
 /**
  * Default prices in CNY, keyed by the exact ids the official llm-deepseek
- * catalog advertises (CNY per 1M tokens).
+ * catalog advertises (CNY per 1M tokens). Verified against the official
+ * DeepSeek API pricing page (api-docs.deepseek.com, fetched 2026-08-14):
+ * deepseek-v4-flash 缓存命中 0.02 / 未命中 1 / 输出 2；deepseek-v4-pro
+ * 缓存命中 0.025 / 未命中 3 / 输出 6。
+ * NOTE: DeepSeek 将于 2026-08-17 00:00（北京时间）切换峰谷定价（高峰时段为
+ * 北京时间 9:00–12:00、14:00–18:00，空闲时段为高峰的一半）；下表为切换前的
+ * 现行平价。cacheWritePerM 无官方价格（DeepSeek 只按缓存命中/未命中与输出计费，
+ * 无缓存写入桶），仅作占位，DeepSeek 用量不会产生 cacheWriteTokens。
  */
 export const DEFAULT_PRICES_CNY: Record<string, ModelPrice> = {
-  // TODO(verify-prices): replace the example numbers below with the current
-  // official DeepSeek public prices before release; the acceptance tests only
-  // assert positivity, so this is a manual step.
-  'deepseek-v4-flash': { inputPerM: 0.28, cacheReadPerM: 0.028, outputPerM: 0.42, cacheWritePerM: 0.28 },
-  'deepseek-v4-pro': { inputPerM: 0.56, cacheReadPerM: 0.056, outputPerM: 0.84, cacheWritePerM: 0.56 },
+  'deepseek-v4-flash': { inputPerM: 1, cacheReadPerM: 0.02, outputPerM: 2, cacheWritePerM: 0.28 },
+  'deepseek-v4-pro': { inputPerM: 3, cacheReadPerM: 0.025, outputPerM: 6, cacheWritePerM: 0.56 },
 }
 
 /**
- * Default prices in USD. Placeholder conversion from the CNY defaults at a
- * 7.2 CNY/USD reference rate, rounded to 3 decimals.
- * TODO(verify-prices): replace with the current official DeepSeek USD prices
- * before release; the acceptance tests only assert positivity.
+ * Default prices in USD, verified against the official DeepSeek API pricing
+ * page (2026-08): deepseek-v4-flash $0.14 / $0.0028 / $0.28；
+ * deepseek-v4-pro $0.435 / $0.003625 / $0.87。峰谷价切换说明同 CNY 表。
  */
 export const DEFAULT_PRICES_USD: Record<string, ModelPrice> = {
-  'deepseek-v4-flash': { inputPerM: 0.039, cacheReadPerM: 0.004, outputPerM: 0.058, cacheWritePerM: 0.039 },
-  'deepseek-v4-pro': { inputPerM: 0.078, cacheReadPerM: 0.008, outputPerM: 0.117, cacheWritePerM: 0.078 },
+  'deepseek-v4-flash': { inputPerM: 0.14, cacheReadPerM: 0.0028, outputPerM: 0.28, cacheWritePerM: 0.039 },
+  'deepseek-v4-pro': { inputPerM: 0.435, cacheReadPerM: 0.003625, outputPerM: 0.87, cacheWritePerM: 0.078 },
 }
 
 /** Raw plugin config; every field optional in yml. */

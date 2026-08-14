@@ -1,13 +1,13 @@
-/** Settings → Usage Stats page: range switch, summaries, charts, price table. */
+/** Settings → Token Usage page: range switch, summaries, charts, price table. */
 import { useState } from 'react'
-import type { UsageStatsStore, UsageStatsState } from './store.ts'
+import type { TokenUsageStore, TokenUsageState } from './store.ts'
 import { LineChart, type ChartSeries } from './LineChart.tsx'
 import { PriceTable } from './PriceTable.tsx'
 import type { Currency, ModelPrice, TokenTotals } from '../shared/types.ts'
 
-export interface UsageStatsSectionProps {
-  controller: UsageStatsStore
-  useSnapshot: () => UsageStatsState
+export interface TokenUsageSectionProps {
+  controller: TokenUsageStore
+  useSnapshot: () => TokenUsageState
   t: (key: string) => any
   /** Persist edited prices for one currency (settings write + refresh). */
   onSavePrices: (currency: Currency, prices: Record<string, ModelPrice>) => Promise<void>
@@ -35,8 +35,8 @@ function series(buckets: { date: string; tokens: TokenTotals }[], pick: (t: Toke
   return buckets.map(b => ({ label: b.date.slice(5), value: pick(b.tokens) }))
 }
 
-/** The full usage-stats page body. */
-export function UsageStatsSection({ controller, useSnapshot, t, onSavePrices }: UsageStatsSectionProps): JSX.Element {
+/** The full token-usage page body. */
+export function TokenUsageSection({ controller, useSnapshot, t, onSavePrices }: TokenUsageSectionProps): JSX.Element {
   const snapshot = useSnapshot()
   const [seriesKey, setSeriesKey] = useState<SeriesKey>('total')
 
@@ -60,7 +60,7 @@ export function UsageStatsSection({ controller, useSnapshot, t, onSavePrices }: 
   ]
 
   return (
-    <div className="usage-stats">
+    <div className="token-usage">
       <div className="stats-toolbar">
         {RANGES.map(days => (
           <button key={days} className={snapshot.days === days ? 'range-btn active' : 'range-btn'}

@@ -1,5 +1,5 @@
 /**
- * HTTP handler for GET /dsh-usage-stats/stats?days=7|15|30. Composes the
+ * HTTP handler for GET /dsh-token-usage/stats?days=7|15|30. Composes the
  * page payload: aggregated buckets + totals (CNY and USD), the llm model
  * catalog joined with both currencies' prices, and unpriced-but-used models.
  *

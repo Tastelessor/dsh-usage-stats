@@ -1,7 +1,7 @@
 /** Cross-process JSON contract between the host aggregation and the browser page. */
 
 /** Settings-namespace name of this plugin (host applies the settingsNamespace brand). */
-export const SETTINGS_NAMESPACE = 'dsh-usage-stats' as const
+export const SETTINGS_NAMESPACE = 'dsh-token-usage' as const
 
 /** Price-table display currency: CNY by default, USD optional. */
 export type Currency = 'CNY' | 'USD'
@@ -75,7 +75,7 @@ export interface ModelPricesByCurrency {
   usd?: ModelPrice
 }
 
-/** The whole page payload served by GET /dsh-usage-stats/stats?days=N. */
+/** The whole page payload served by GET /dsh-token-usage/stats?days=N. */
 export interface StatsResponse {
   days: number
   /** Inclusive window start, epoch ms. */
