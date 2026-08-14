@@ -1,14 +1,17 @@
 # dsh-usage-stats
 
 dsh（DeepSeek Harness）外部插件：在 Web 设置面板新增「用量统计」页，展示过去 7/15/30 天的
-token 用量与估算金额折线图，以及当前已接入模型的 M tokens 单价表（输入命中缓存 / 输入未命中缓存 / 输出）。
+token 用量与估算金额折线图，以及当前已接入模型的 M tokens 单价表（输入命中缓存 / 输入未命中缓存 / 输出），
+并支持在页面内直接编辑两种货币下的模型单价。
 
 ## 功能
 
-- 设置 → 用量统计：时间范围切换（7/15/30 天）、token 用量折线图（总量 / 输入 / 输出 / 缓存 / 推理）、金额折线图、汇总卡片。
-- 模型单价表：展示当前已接入模型（来自 `ctx.llm` 模型目录）的单价；默认内置 `deepseek-v4-flash` 与 `deepseek-v4-pro` 价格。
+- 设置 → 用量统计：时间范围切换（7/15/30 天）、token 用量折线图（总量 / 输入 / 输出 / 缓存 / 推理）、金额折线图（CNY 与 USD 双系列）、折线图 hover 显示具体数值。
+- 汇总卡片：Token 总量、日均 Token、平均缓存命中率、估算金额（CNY 与 USD 同时展示）。
+- 模型单价表：展示当前已接入模型（来自 `ctx.llm` 模型目录）在 **CNY 与 USD 两种货币**下的单价；默认内置 `deepseek-v4-flash` 与 `deepseek-v4-pro` 价格。
+- **单价编辑**：单价表内切换 CNY/USD 币种，内联修改价格后点「保存单价」写回配置，统计自动按新价刷新。
 - 数据来源：历史会话日志中 `assistant/message` 事件携带的 `usage`（纯观察者，不改动 agent-loop）。
-- 计价默认货币 CNY（¥），可配置 USD（$）。
+- 性能：按 session 文件 mtime 剪枝 + 有界并发读取 + 30s 响应缓存，实测 69 个 session 由 12.8s 降至约 1s（热缓存 <1ms）。
 
 ## 界面截图
 
@@ -39,25 +42,33 @@ dsh plugin --profile demo add github:you/dsh-usage-stats#<commit-sha>
 
 ## 配置（单价表）
 
-在 profile 的 `cordis.patch.yml`（或 `--patch` overlay）覆盖：
+在 profile 的 `cordis.patch.yml`（或 `--patch` overlay）覆盖；两种货币分别配置，缺省沿用内置默认价：
 
 ```yaml
 - patch:
     - id: dsh-usage-stats
       config:
-        currency: CNY        # 计价货币：CNY（默认，¥）/ USD（$）
+        currency: CNY        # 首选币种：CNY（默认，¥）/ USD（$）
         models:
           deepseek-v4-flash:
-            inputPerM: 0.28        # 输入未命中缓存（CNY / M tokens，默认货币）
-            cacheReadPerM: 0.028   # 输入命中缓存
-            outputPerM: 0.42       # 输出
-            cacheWritePerM: 0.28   # 缓存写入（仅参与金额估算，不在表中展示）
+            cny:             # 人民币单价（¥ / M tokens）
+              inputPerM: 0.28        # 输入未命中缓存
+              cacheReadPerM: 0.028   # 输入命中缓存
+              outputPerM: 0.42       # 输出
+              cacheWritePerM: 0.28   # 缓存写入（仅参与金额估算，不在表中展示）
+            usd:             # 美元单价（$ / M tokens）
+              inputPerM: 0.039
+              cacheReadPerM: 0.004
+              outputPerM: 0.058
+              cacheWritePerM: 0.039
 ```
+
+> 页面内「保存单价」等价于写入上述 `models.<id>.cny|usd`，无需手改配置。
 
 ## 已知限制 / 免责声明
 
-- 金额为**估算值**（内置单价表 × 实际 token 四桶），非 provider 账单；单价以官方最新价为准，请自行核对。
-- 计价默认货币 CNY（¥），可配置 USD（$）；单价表数值即所选货币下每 M tokens 的价格。
+- 金额为**估算值**（内置单价表 × 实际 token 四桶），非 provider 账单；单价以官方最新价为准，请自行核对（内置 USD 价暂按 7.2 汇率折算，待核）。
+- 金额同时按 CNY 与 USD 估算并同屏展示；两种货币的单价独立配置。
 - `reasoningTokens` 是输出子类，不会重复计入金额。
-- 未配置单价的模型：token 照常统计，金额不计入，页面提示「未配置」。
-- 聚合在 node 半内存完成，无持久化缓存；数据量极大时页面加载可能变慢。
+- 两种货币都未配置单价的模型：token 照常统计，金额不计入，页面提示「未配置」。
+- 聚合在 node 半内存完成，仅 30s 短时缓存；数据量极大时首次加载可能仍需数秒。

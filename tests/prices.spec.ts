@@ -1,29 +1,54 @@
-/** Price table resolution: defaults exist and configured entries win. */
+/** Price table resolution: per-currency defaults exist and configured entries win. */
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_PRICES, resolveCurrency, resolvePriceTable } from '../src/host/config.ts'
+import { DEFAULT_PRICES_CNY, DEFAULT_PRICES_USD, resolveCurrency, resolvePriceTable, resolvePriceTables } from '../src/host/config.ts'
 
-describe('resolvePriceTable', () => {
-  it('ships defaults for deepseek-v4-flash and deepseek-v4-pro', () => {
-    for (const id of ['deepseek-v4-flash', 'deepseek-v4-pro']) {
-      const price = DEFAULT_PRICES[id]
-      expect(price).toBeDefined()
-      for (const key of ['inputPerM', 'cacheReadPerM', 'outputPerM', 'cacheWritePerM'] as const) {
-        expect(price[key]).toBeGreaterThan(0)
-        expect(Number.isFinite(price[key])).toBe(true)
+describe('price defaults', () => {
+  it('ships CNY and USD defaults for deepseek-v4-flash and deepseek-v4-pro', () => {
+    for (const table of [DEFAULT_PRICES_CNY, DEFAULT_PRICES_USD]) {
+      for (const id of ['deepseek-v4-flash', 'deepseek-v4-pro']) {
+        const price = table[id]
+        expect(price).toBeDefined()
+        for (const key of ['inputPerM', 'cacheReadPerM', 'outputPerM', 'cacheWritePerM'] as const) {
+          expect(price[key]).toBeGreaterThan(0)
+          expect(Number.isFinite(price[key])).toBe(true)
+        }
       }
     }
   })
 
-  it('merges configured entries over defaults', () => {
-    const table = resolvePriceTable({
-      models: { 'deepseek-v4-flash': { inputPerM: 1, cacheReadPerM: 2, outputPerM: 3, cacheWritePerM: 4 } },
+  it('keeps the USD defaults strictly below the CNY ones', () => {
+    for (const id of ['deepseek-v4-flash', 'deepseek-v4-pro']) {
+      expect(DEFAULT_PRICES_USD[id].inputPerM).toBeLessThan(DEFAULT_PRICES_CNY[id].inputPerM)
+      expect(DEFAULT_PRICES_USD[id].outputPerM).toBeLessThan(DEFAULT_PRICES_CNY[id].outputPerM)
+    }
+  })
+})
+
+describe('resolvePriceTables', () => {
+  it('merges configured per-currency entries over defaults independently', () => {
+    const tables = resolvePriceTables({
+      models: {
+        'deepseek-v4-flash': {
+          cny: { inputPerM: 1, cacheReadPerM: 2, outputPerM: 3, cacheWritePerM: 4 },
+        },
+        'some-model': { usd: { inputPerM: 5, cacheReadPerM: 6, outputPerM: 7, cacheWritePerM: 8 } },
+      },
     })
-    expect(table['deepseek-v4-flash'].inputPerM).toBe(1)
-    expect(table['deepseek-v4-pro']).toEqual(DEFAULT_PRICES['deepseek-v4-pro'])
+    expect(tables.cny['deepseek-v4-flash'].inputPerM).toBe(1)
+    expect(tables.usd['deepseek-v4-flash']).toEqual(DEFAULT_PRICES_USD['deepseek-v4-flash'])
+    expect(tables.cny['deepseek-v4-pro']).toEqual(DEFAULT_PRICES_CNY['deepseek-v4-pro'])
+    expect(tables.cny['some-model']).toBeUndefined()
+    expect(tables.usd['some-model'].inputPerM).toBe(5)
+  })
+
+  it('resolvePriceTable picks the requested currency', () => {
+    const config = { models: { 'deepseek-v4-flash': { usd: { inputPerM: 9, cacheReadPerM: 9, outputPerM: 9, cacheWritePerM: 9 } } } }
+    expect(resolvePriceTable(config, 'USD')['deepseek-v4-flash'].inputPerM).toBe(9)
+    expect(resolvePriceTable(config, 'CNY')['deepseek-v4-flash']).toEqual(DEFAULT_PRICES_CNY['deepseek-v4-flash'])
   })
 
   it('falls back to defaults when config is empty', () => {
-    expect(resolvePriceTable(undefined)).toEqual(DEFAULT_PRICES)
+    expect(resolvePriceTables(undefined)).toEqual({ cny: DEFAULT_PRICES_CNY, usd: DEFAULT_PRICES_USD })
   })
 
   it('defaults the currency to CNY and honors an override', () => {

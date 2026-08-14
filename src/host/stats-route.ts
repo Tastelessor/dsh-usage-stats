@@ -1,31 +1,65 @@
 /**
  * HTTP handler for GET /dsh-usage-stats/stats?days=7|15|30. Composes the
- * page payload: aggregated buckets + totals, the llm model catalog joined
- * with prices, and unpriced-but-used models. Per-session read failures are
- * contained (logged by the caller); one bad session never fails the page.
+ * page payload: aggregated buckets + totals (CNY and USD), the llm model
+ * catalog joined with both currencies' prices, and unpriced-but-used models.
+ *
+ * Session reads are the hot path: the handler resolves lightweight sources
+ * first (headers + a file-mtime hint), skips persisted sessions whose log has
+ * not been touched inside the window, and loads the remaining logs with a
+ * bounded worker pool. Per-session read failures are contained (skipped);
+ * one bad session never fails the page.
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { LlmModelInfo, LlmProviderInfo } from '@deepseek-ai/dsh-llm'
-import type { SessionLogSnapshot, SessionRecord } from '@deepseek-ai/dsh-session-query'
+import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import type { ModelPrice, ModelPriceRow, StatsResponse } from '../shared/types.ts'
-import type { Currency } from '../shared/types.ts'
-import { aggregateUsage } from './aggregate.ts'
+import type { Currency, ModelPrice, ModelPriceRow, StatsResponse } from '../shared/types.ts'
+import { aggregateUsage, windowStartMs } from './aggregate.ts'
 import { usageSamplesOf } from './samples.ts'
+
+/** One candidate session resolved without loading its log. */
+export interface SessionSource {
+  id: SessionId
+  createdAt: number
+  /** Whether the session currently exists live (in-memory); live sources are never mtime-pruned. */
+  live: boolean
+  /**
+   * Persisted log file mtime, when the persistence backend can resolve an
+   * artifact path. A persisted source whose mtime predates the window start
+   * cannot contain in-window events and is skipped without a log read.
+   */
+  mtimeMs?: number
+}
 
 /** Everything the route needs from the host; faked directly in tests. */
 export interface StatsDeps {
-  listSessions(): Promise<readonly SessionRecord[]>
-  readSession(sessionId: SessionId): Promise<SessionLogSnapshot>
+  /** Resolve all candidate sessions (headers + live flag + mtime hint). */
+  listSessions(): Promise<readonly SessionSource[]>
+  /** Load one candidate's complete raw event log; a throw skips the session. */
+  loadEvents(source: SessionSource): Promise<readonly SessionEvent[]>
   listProviders(): readonly LlmProviderInfo[]
   listModels(provider: string): Promise<readonly LlmModelInfo[]>
-  prices(): Readonly<Record<string, ModelPrice>>
+  pricesCny(): Readonly<Record<string, ModelPrice>>
+  pricesUsd(): Readonly<Record<string, ModelPrice>>
   currency(): Currency
   now?(): number
+  /** Max concurrent session log loads; default 8. */
+  concurrency?(): number
+  /** Optional TTL cache keyed by window length; returns the cached JSON payload or undefined. */
+  cache?: {
+    get(days: number): string | undefined
+    set(days: number, payload: string): void
+  }
 }
 
 const DAY_CHOICES = new Set([7, 15, 30])
+const DEFAULT_CONCURRENCY = 8
+
+const RESPONSE_HEADERS = {
+  'content-type': 'application/json; charset=utf-8',
+  'cache-control': 'no-store',
+} as const
 
 /** Parse ?days= into one of 7/15/30; anything else (including absent) → 7. */
 export function parseDays(raw: string | null): number {
@@ -34,11 +68,28 @@ export function parseDays(raw: string | null): number {
   return DAY_CHOICES.has(value) ? value : 7
 }
 
-/** Join the llm catalog with the price table into display rows. */
+/** Run fn over items with at most `limit` in flight, preserving order. */
+export function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length)
+  let cursor = 0
+  const workerCount = Math.max(1, Math.min(limit, items.length))
+  const workers = Array.from({ length: workerCount }, async () => {
+    for (;;) {
+      const index = cursor
+      cursor += 1
+      if (index >= items.length) return
+      results[index] = await fn(items[index] as T)
+    }
+  })
+  return Promise.all(workers).then(() => results)
+}
+
+/** Join the llm catalog with both currency price tables into display rows. */
 export function modelRows(
   providers: readonly LlmProviderInfo[],
   listModels: (provider: string) => Promise<readonly LlmModelInfo[]>,
-  prices: Readonly<Record<string, ModelPrice>>,
+  pricesCny: Readonly<Record<string, ModelPrice>>,
+  pricesUsd: Readonly<Record<string, ModelPrice>>,
 ): Promise<ModelPriceRow[]> {
   return Promise.all(providers.map(async (provider) => {
     let models: readonly LlmModelInfo[]
@@ -47,19 +98,13 @@ export function modelRows(
     } catch {
       models = []
     }
-    return models.map((model) => {
-      const price = prices[model.id]
-      return {
-        provider: provider.id,
-        model: model.id,
-        name: model.name,
-        inputPerM: price?.inputPerM ?? null,
-        cacheReadPerM: price?.cacheReadPerM ?? null,
-        outputPerM: price?.outputPerM ?? null,
-        cacheWritePerM: price?.cacheWritePerM ?? null,
-        priced: price !== undefined,
-      }
-    })
+    return models.map((model) => ({
+      provider: provider.id,
+      model: model.id,
+      name: model.name,
+      cny: pricesCny[model.id] ?? null,
+      usd: pricesUsd[model.id] ?? null,
+    }))
   })).then(rows => rows.flat())
 }
 
@@ -84,35 +129,43 @@ export function createStatsHandler(deps: StatsDeps): (req: IncomingMessage, res:
     }
     const days = parseDays(url.searchParams.get('days'))
 
-    const now = deps.now?.() ?? Date.now()
-    const samples: ReturnType<typeof usageSamplesOf> = []
-    let sessions: readonly SessionRecord[]
-    try {
-      sessions = await deps.listSessions()
-    } catch {
-      sessions = []
-    }
-    for (const record of sessions) {
-      if (record.header.createdAt > now) continue // cannot contain in-range events
-      try {
-        const log = await deps.readSession(record.header.id)
-        samples.push(...usageSamplesOf(log.events))
-      } catch {
-        continue // one broken session must not fail the page
-      }
+    const cached = deps.cache?.get(days)
+    if (cached !== undefined) {
+      res.writeHead(200, RESPONSE_HEADERS)
+      res.end(cached)
+      return
     }
 
-    const prices = deps.prices()
-    const aggregation = aggregateUsage(samples, prices, days, now)
+    const now = deps.now?.() ?? Date.now()
+    const fromMs = windowStartMs(now, days)
+    let sources: readonly SessionSource[]
+    try {
+      sources = await deps.listSessions()
+    } catch {
+      sources = []
+    }
+    const candidates = sources.filter(source =>
+      source.createdAt <= now
+      && (source.live || source.mtimeMs === undefined || source.mtimeMs >= fromMs))
+
+    const concurrency = deps.concurrency?.() ?? DEFAULT_CONCURRENCY
+    const loaded = await mapLimit(candidates, concurrency, async (source) => {
+      try {
+        return usageSamplesOf(await deps.loadEvents(source))
+      } catch {
+        return [] // one broken session must not fail the page
+      }
+    })
+
+    const pricesCny = deps.pricesCny()
+    const pricesUsd = deps.pricesUsd()
+    const aggregation = aggregateUsage(loaded.flat(), { cny: pricesCny, usd: pricesUsd }, days, now)
     const providers = deps.listProviders()
-    const models = await modelRows(providers, deps.listModels, prices)
-    const from = aggregation.buckets[0] === undefined
-      ? now
-      : new Date(`${aggregation.buckets[0].date}T00:00:00`).getTime()
+    const models = await modelRows(providers, deps.listModels, pricesCny, pricesUsd)
 
     const body: StatsResponse = {
       days,
-      from,
+      from: fromMs,
       to: now,
       generatedAt: now,
       currency: deps.currency(),
@@ -122,10 +175,8 @@ export function createStatsHandler(deps: StatsDeps): (req: IncomingMessage, res:
       unpricedModels: aggregation.unpricedModels,
     }
     const payload = JSON.stringify(body)
-    res.writeHead(200, {
-      'content-type': 'application/json; charset=utf-8',
-      'cache-control': 'no-store',
-    })
+    deps.cache?.set(days, payload)
+    res.writeHead(200, RESPONSE_HEADERS)
     res.end(payload)
   }
 }

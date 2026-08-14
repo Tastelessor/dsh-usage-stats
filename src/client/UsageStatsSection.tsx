@@ -1,15 +1,16 @@
 /** Settings → Usage Stats page: range switch, summaries, charts, price table. */
 import { useState } from 'react'
 import type { UsageStatsStore, UsageStatsState } from './store.ts'
-import { LineChart } from './LineChart.tsx'
+import { LineChart, type ChartSeries } from './LineChart.tsx'
 import { PriceTable } from './PriceTable.tsx'
-import type { TokenTotals } from '../shared/types.ts'
-import type { Currency } from '../shared/types.ts'
+import type { Currency, ModelPrice, TokenTotals } from '../shared/types.ts'
 
 export interface UsageStatsSectionProps {
   controller: UsageStatsStore
   useSnapshot: () => UsageStatsState
   t: (key: string) => any
+  /** Persist edited prices for one currency (settings write + refresh). */
+  onSavePrices: (currency: Currency, prices: Record<string, ModelPrice>) => Promise<void>
 }
 
 const RANGES = [7, 15, 30] as const
@@ -23,16 +24,19 @@ const formatTokens = (value: number): string => {
 }
 
 const SYMBOL: Record<Currency, string> = { CNY: '¥', USD: '$' }
+const SERIES_COLORS: Record<Currency, string> = { CNY: '#2563eb', USD: '#16a34a' }
 
 const formatMoney = (value: number | null, currency: Currency): string => value === null ? '—' : `${SYMBOL[currency]}${value.toFixed(2)}`
 
+const formatPercent = (value: number): string => `${(value * 100).toFixed(1)}%`
+
 /** One series extracted from the day buckets. */
-function series(buckets: { date: string; tokens: TokenTotals }[], pick: (t: TokenTotals) => number) {
+function series(buckets: { date: string; tokens: TokenTotals }[], pick: (t: TokenTotals) => number): ChartSeries['points'] {
   return buckets.map(b => ({ label: b.date.slice(5), value: pick(b.tokens) }))
 }
 
 /** The full usage-stats page body. */
-export function UsageStatsSection({ controller, useSnapshot, t }: UsageStatsSectionProps): JSX.Element {
+export function UsageStatsSection({ controller, useSnapshot, t, onSavePrices }: UsageStatsSectionProps): JSX.Element {
   const snapshot = useSnapshot()
   const [seriesKey, setSeriesKey] = useState<SeriesKey>('total')
 
@@ -50,6 +54,10 @@ export function UsageStatsSection({ controller, useSnapshot, t }: UsageStatsSect
     reasoning: t => t.reasoning,
   }
   const hasUsage = data.totals.tokens.total > 0
+  const amountSeries: ChartSeries[] = [
+    { name: 'CNY', color: SERIES_COLORS.CNY, points: data.buckets.map(b => ({ label: b.date.slice(5), value: b.amountCny ?? 0 })) },
+    { name: 'USD', color: SERIES_COLORS.USD, points: data.buckets.map(b => ({ label: b.date.slice(5), value: b.amountUsd ?? 0 })) },
+  ]
 
   return (
     <div className="usage-stats">
@@ -65,7 +73,10 @@ export function UsageStatsSection({ controller, useSnapshot, t }: UsageStatsSect
 
       <div className="stats-summary">
         <div className="summary-card"><div className="summary-label">{t('summaryTokens')}</div><div className="summary-value">{formatTokens(data.totals.tokens.total)}</div></div>
-        <div className="summary-card"><div className="summary-label">{t('summaryAmount')}</div><div className="summary-value">{formatMoney(data.totals.amount, currency)}</div></div>
+        <div className="summary-card"><div className="summary-label">{t('summaryDailyAvg')}</div><div className="summary-value">{formatTokens(data.totals.avgDailyTokens)}</div></div>
+        <div className="summary-card"><div className="summary-label">{t('summaryCacheHit')}</div><div className="summary-value">{formatPercent(data.totals.cacheHitRate)}</div></div>
+        <div className="summary-card"><div className="summary-label">{t('summaryAmountCny')}</div><div className="summary-value">{formatMoney(data.totals.amountCny, 'CNY')}</div></div>
+        <div className="summary-card"><div className="summary-label">{t('summaryAmountUsd')}</div><div className="summary-value">{formatMoney(data.totals.amountUsd, 'USD')}</div></div>
       </div>
 
       {!hasUsage
@@ -80,14 +91,16 @@ export function UsageStatsSection({ controller, useSnapshot, t }: UsageStatsSect
                 </button>
               ))}
             </div>
-            <LineChart title={t('chartTokens')} points={series(data.buckets, pick[seriesKey])} format={formatTokens} />
-            <LineChart title={t('chartAmount')}
-              points={data.buckets.map(b => ({ label: b.date.slice(5), value: b.amount ?? 0 }))}
-              format={v => `${SYMBOL[currency]}${v.toFixed(2)}`} />
+            <LineChart title={t('chartTokens')}
+              series={[{ name: t('seriesToken'), color: SERIES_COLORS.CNY, points: series(data.buckets, pick[seriesKey]) }]}
+              format={formatTokens} />
+            <LineChart title={t('chartAmount')} series={amountSeries}
+              format={v => v.toFixed(2)} />
           </>
         )}
 
-      <PriceTable models={data.models} unpricedModels={data.unpricedModels} currency={currency} t={t} />
+      <PriceTable models={data.models} unpricedModels={data.unpricedModels} currency={currency} t={t}
+        onSavePrices={onSavePrices} />
     </div>
   )
 }

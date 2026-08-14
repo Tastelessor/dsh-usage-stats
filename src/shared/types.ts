@@ -1,9 +1,12 @@
 /** Cross-process JSON contract between the host aggregation and the browser page. */
 
+/** Settings-namespace name of this plugin (host applies the settingsNamespace brand). */
+export const SETTINGS_NAMESPACE = 'dsh-usage-stats' as const
+
 /** Price-table display currency: CNY by default, USD optional. */
 export type Currency = 'CNY' | 'USD'
 
-/** Per-million-token price for one model, in the selected currency. */
+/** Per-million-token price for one model, in one currency. */
 export interface ModelPrice {
   /** Uncached input, per 1M tokens. */
   inputPerM: number
@@ -30,26 +33,46 @@ export interface DayBucket {
   /** Local calendar date, 'YYYY-MM-DD'. */
   date: string
   tokens: TokenTotals
-  /** Estimated amount; null when no priced model contributed that day. */
-  amount: number | null
+  /** Estimated amount in CNY; null when no CNY-priced model contributed that day. */
+  amountCny: number | null
+  /** Estimated amount in USD; null when no USD-priced model contributed that day. */
+  amountUsd: number | null
 }
 
-/** A model seen in usage but absent from the price table. */
+/** Whole-range totals plus derived summary metrics. */
+export interface StatsTotals {
+  tokens: TokenTotals
+  /** Estimated amount in CNY; null when no CNY-priced model produced usage in the range. */
+  amountCny: number | null
+  /** Estimated amount in USD; null when no USD-priced model produced usage in the range. */
+  amountUsd: number | null
+  /** tokens.total / days — the average daily token volume. */
+  avgDailyTokens: number
+  /** cacheRead / (input + cacheRead + cacheWrite) over the range; 0 when there is no prompt input. */
+  cacheHitRate: number
+}
+
+/** A model seen in usage but absent from both currency price tables. */
 export interface UnpricedModel {
   provider: string
   model: string
 }
 
-/** One row of the model price table (catalog row joined with prices). */
+/** One row of the model price table: catalog row joined with both currencies' prices. */
 export interface ModelPriceRow {
   provider: string
   model: string
   name: string
-  inputPerM: number | null
-  cacheReadPerM: number | null
-  outputPerM: number | null
-  cacheWritePerM: number | null
-  priced: boolean
+  /** Price in CNY, or null when not configured. */
+  cny: ModelPrice | null
+  /** Price in USD, or null when not configured. */
+  usd: ModelPrice | null
+}
+
+/** Settings-section shape written back by the price editor (shared with the host config). */
+export interface ModelPricesByCurrency {
+  cny?: ModelPrice
+  usd?: ModelPrice
 }
 
 /** The whole page payload served by GET /dsh-usage-stats/stats?days=N. */
@@ -60,12 +83,12 @@ export interface StatsResponse {
   /** Inclusive window end, epoch ms. */
   to: number
   generatedAt: number
-  /** Display currency for every amount in this payload. */
+  /** Preferred display currency (seeds the price-table toggle). */
   currency: Currency
   buckets: DayBucket[]
-  totals: { tokens: TokenTotals; amount: number | null }
+  totals: StatsTotals
   /** Price table rows for every catalog model. */
   models: ModelPriceRow[]
-  /** Models that produced usage but have no price configured. */
+  /** Models that produced usage but have no price configured in either currency. */
   unpricedModels: UnpricedModel[]
 }

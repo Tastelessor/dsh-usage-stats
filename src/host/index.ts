@@ -1,20 +1,31 @@
 /**
  * dsh-usage-stats host half: aggregates token usage from persisted session
  * logs and serves it as JSON over a plugin-owned HTTP route.
+ *
+ * Session reads avoid the sessionQuery replay-validation path: live sessions
+ * are read straight from the in-memory store (frozen events), and persisted
+ * sessions are pruned by log file mtime before a direct persistence read.
  * @module dsh-usage-stats/host
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+import { stat } from 'node:fs/promises'
 import { installSettingsSection } from '@deepseek-ai/dsh-settings'
+// Type-only: loads the cordis Context augmentation for ctx.sessionQuery and
+// the host SessionStore contract for ctx.sessions (the client-runtime
+// ISessions face shadows `sessions` in this mixed program, so the live store
+// access is narrowed explicitly below).
+import type {} from '@deepseek-ai/dsh-session-query'
+import type { SessionStore } from '@deepseek-ai/dsh-session'
 // Loads the '@deepseek-ai/cordis' Context augmentation that types ctx.webServer.
 import type {} from '@deepseek-ai/dsh-host-webserver'
-import { ConfigSchema, NS, resolveCurrency, resolvePriceTable, type Config } from './config.ts'
-import { createStatsHandler } from './stats-route.ts'
+import { ConfigSchema, NS, resolveCurrency, resolvePriceTables, type Config } from './config.ts'
+import { createStatsHandler, type SessionSource } from './stats-route.ts'
 
 export const name = 'dsh-usage-stats'
 
-/** Host services this plugin depends on. */
-export const inject = ['llm', 'sessionQuery', 'webServer']
+/** Host services this plugin depends on (sessions rides sessionQuery's own inject). */
+export const inject = ['llm', 'sessionQuery', 'webServer', 'sessions']
 
 export function apply(ctx: Context, config: Config): void {
   // Resolved-config source: starts as the composition entry; the settings
@@ -28,14 +39,66 @@ export function apply(ctx: Context, config: Config): void {
   })
   const llm = ctx.llm
   const sessionQuery = ctx.sessionQuery
-  const prices = (): ReturnType<typeof resolvePriceTable> => resolvePriceTable(current())
+  const priceTables = (): ReturnType<typeof resolvePriceTables> => resolvePriceTables(current())
+
+  // Short-lived response cache: repeat views and range switches are instant,
+  // and any settings write for this namespace drops it immediately.
+  const CACHE_TTL_MS = 30_000
+  const cache = new Map<number, { at: number; payload: string }>()
+  ctx.on('settings/updated', (ns) => {
+    if (ns === NS) cache.clear()
+  })
+
   const handler = createStatsHandler({
-    listSessions: (signal?: AbortSignal) => sessionQuery.listSessions(signal),
-    readSession: (sessionId) => sessionQuery.readSession(sessionId),
+    listSessions: async () => {
+      const records = await sessionQuery.listSessions()
+      const persistence = ctx.get('sessionPersistence')
+      const sources: SessionSource[] = []
+      for (const record of records) {
+        let mtimeMs: number | undefined
+        // Prune persisted logs by file mtime: an untouched log predates the
+        // window and cannot hold in-window events. Live sessions are exempt
+        // (their in-memory head is fresher than the last persisted write).
+        if (!record.live && persistence !== undefined) {
+          try {
+            const location = persistence.locate(record.header)
+            if (location !== undefined) {
+              const identity = await stat(location.path)
+              mtimeMs = identity.mtimeMs
+            }
+          } catch {
+            // Pruning unavailable for this session; fall back to reading it.
+          }
+        }
+        sources.push({ id: record.header.id, createdAt: record.header.createdAt, live: record.live, mtimeMs })
+      }
+      return sources
+    },
+    loadEvents: async (source) => {
+      // Live head beats the persisted tail: frozen in-memory events need no I/O.
+      const live = (ctx.sessions as unknown as SessionStore).get(source.id)
+      if (live !== undefined) return live.events
+      const persistence = ctx.get('sessionPersistence')
+      if (persistence !== undefined) return (await persistence.inspect(source.id)).events
+      // Last-resort fallback when no persistence backend is mounted.
+      return (await sessionQuery.readSession(source.id)).events
+    },
     listProviders: () => llm.listProviders(),
     listModels: (provider) => llm.listModels(provider),
-    prices,
+    pricesCny: () => priceTables().cny,
+    pricesUsd: () => priceTables().usd,
     currency: () => resolveCurrency(current()),
+    cache: {
+      get: (days) => {
+        const entry = cache.get(days)
+        if (entry === undefined || Date.now() - entry.at >= CACHE_TTL_MS) {
+          if (entry !== undefined) cache.delete(days)
+          return undefined
+        }
+        return entry.payload
+      },
+      set: (days, payload) => { cache.set(days, { at: Date.now(), payload }) },
+    },
   })
   ctx.effect(
     () => ctx.webServer.register({ kind: 'prefix', path: '/dsh-usage-stats', handler }),

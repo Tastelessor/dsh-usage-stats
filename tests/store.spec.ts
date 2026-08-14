@@ -6,7 +6,8 @@ import type { StatsResponse } from '../src/shared/types.ts'
 
 const RESPONSE: StatsResponse = {
   days: 7, from: 0, to: 0, generatedAt: 0, currency: 'CNY',
-  buckets: [], totals: { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, total: 0 }, amount: null },
+  buckets: [],
+  totals: { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, total: 0 }, amountCny: null, amountUsd: null, avgDailyTokens: 0, cacheHitRate: 0 },
   models: [], unpricedModels: [],
 }
 
