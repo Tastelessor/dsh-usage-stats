@@ -1,0 +1,35 @@
+# Local tooling / private working docs (not part of the published repo)
+.gitnexus/
+superpowers/
+
+# Dependencies
+node_modules/
+
+# Build output
+# lib/ is the publish artifact (package.json "files"), built by `prepare`
+# on GitHub install and before `pnpm publish`; never committed.
+lib/
+dist/
+
+# TypeScript
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Test coverage
+coverage/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
