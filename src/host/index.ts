@@ -9,8 +9,9 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import { stat } from 'node:fs/promises'
-import { installSettingsSection } from '@deepseek-ai/dsh-settings'
+import { installSettingsSection, type SettingsPathOp, type SettingsProvider } from '@deepseek-ai/dsh-settings'
 // Type-only: loads the cordis Context augmentation for ctx.sessionQuery and
 // the host SessionStore contract for ctx.sessions (the client-runtime
 // ISessions face shadows `sessions` in this mixed program, so the live store
@@ -21,6 +22,8 @@ import type { SessionStore } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { ConfigSchema, NS, resolveCurrency, resolvePriceTables, type Config } from './config.ts'
 import { createStatsHandler, type SessionSource } from './stats-route.ts'
+import { createPricesHandler, mergePrices } from './prices-route.ts'
+import type { Currency, ModelPrice } from '../shared/types.ts'
 
 export const name = 'dsh-usage-stats'
 
@@ -49,7 +52,24 @@ export function apply(ctx: Context, config: Config): void {
     if (ns === NS) cache.clear()
   })
 
-  const handler = createStatsHandler({
+  // Price write-back: the browser posts the edited currency's overlay here
+  // (the api-proxy refuses external-plugin namespaces to web clients), and we
+  // merge it over the resolved config and persist through the settings seam
+  // in-process. Non-catalog models and the untouched currency survive because
+  // the merge starts from the resolved models dict, not the browser's view.
+  const writePrices = async (currency: Currency, prices: Record<string, ModelPrice>): Promise<void> => {
+    const settings = ctx.get('settings') as SettingsProvider | undefined
+    if (settings === undefined) throw new Error('settings service is unavailable')
+    const models = mergePrices(current().models, currency, prices)
+    const op: SettingsPathOp = { op: 'set', path: ['models'], value: models }
+    await settings.mutate(NS, [op])
+    // Our own write invalidates the aggregation cache immediately; the
+    // settings/updated listener would also do it, but being explicit here
+    // keeps the next fetch correct even if the event fan-out is delayed.
+    cache.clear()
+  }
+
+  const statsHandler = createStatsHandler({
     listSessions: async () => {
       const records = await sessionQuery.listSessions()
       const persistence = ctx.get('sessionPersistence')
@@ -100,9 +120,27 @@ export function apply(ctx: Context, config: Config): void {
       set: (days, payload) => { cache.set(days, { at: Date.now(), payload }) },
     },
   })
+  const pricesHandler = createPricesHandler({ writePrices })
+
+  // One prefix route dispatches the two plugin-owned endpoints: the stats
+  // aggregation (GET) and the price write-back (POST).
+  const route = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    let url: URL
+    try {
+      url = new URL(req.url ?? '/', 'http://dsh.internal')
+    } catch {
+      res.writeHead(400)
+      res.end()
+      return
+    }
+    if (req.method === 'GET' && url.pathname === '/dsh-usage-stats/stats') return statsHandler(req, res)
+    if (req.method === 'POST' && url.pathname === '/dsh-usage-stats/prices') return pricesHandler(req, res)
+    res.writeHead(404)
+    res.end()
+  }
   ctx.effect(
-    () => ctx.webServer.register({ kind: 'prefix', path: '/dsh-usage-stats', handler }),
-    'dsh-usage-stats: stats route',
+    () => ctx.webServer.register({ kind: 'prefix', path: '/dsh-usage-stats', handler: route }),
+    'dsh-usage-stats: stats and prices routes',
   )
   ctx.logger.info('dsh-usage-stats: host half loaded')
 }

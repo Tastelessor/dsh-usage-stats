@@ -56,10 +56,14 @@ const priceSchema = z.object({
   cacheWritePerM: z.number().min(0).required(),
 })
 
-// Schemastery object keys are optional by default; `cny`/`usd` may be absent.
+// Schemastery object keys are optional only when their schema can tolerate an
+// absent value: `z.object` auto-defaults to `{}`, which then fails the
+// `.required()` price fields. A `.default(undefined)` (harness idiom for an
+// optional nested object) makes the key skipable, so `cny`/`usd` may be
+// absent independently — a per-currency price block is optional in yml.
 const currencyPricesSchema = z.object({
-  cny: priceSchema,
-  usd: priceSchema,
+  cny: priceSchema.default(undefined as unknown as ModelPrice),
+  usd: priceSchema.default(undefined as unknown as ModelPrice),
 })
 
 /** Schemastery schema doubling as the settings-section shape. */

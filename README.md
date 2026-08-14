@@ -11,7 +11,7 @@ token 用量与估算金额折线图，以及当前已接入模型的 M tokens �
 - 模型单价表：展示当前已接入模型（来自 `ctx.llm` 模型目录）在 **CNY 与 USD 两种货币**下的单价；默认内置 `deepseek-v4-flash` 与 `deepseek-v4-pro` 价格。
 - **单价编辑**：单价表内切换 CNY/USD 币种，内联修改价格后点「保存单价」写回配置，统计自动按新价刷新。
 - 数据来源：历史会话日志中 `assistant/message` 事件携带的 `usage`（纯观察者，不改动 agent-loop）。
-- 性能：按 session 文件 mtime 剪枝 + 有界并发读取 + 30s 响应缓存，实测 69 个 session 由 12.8s 降至约 1s（热缓存 <1ms）。
+- 性能：按 session 文件 mtime 剪枝 + 有界并发读取 + 30s 响应缓存，实测 69 个 session 由 12.8s 降至约 1s（热缓存 <1ms）；客户端在页面激活时并行预取 7/15/30 天三档数据并做 30s 本地缓存，**切换日期范围即时渲染**（无 loading 闪烁、无额外请求）。
 
 ## 界面截图
 
@@ -65,10 +65,12 @@ dsh plugin --profile demo add github:you/dsh-usage-stats#<commit-sha>
 
 > 页面内「保存单价」等价于写入上述 `models.<id>.cny|usd`，无需手改配置。
 
+> 实现说明：dsh 的 Web 配置 API（`settings.mutate`）只对宿主内置命名空间白名单开放，外部插件命名空间会被拒（`settings-not-exposed`），因此价格写回走插件自有的 `POST /dsh-usage-stats/prices` 路由，由 node 半在进程内调用 `ctx.settings` 落盘（与手改配置完全等价）。
+
 ## 已知限制 / 免责声明
 
 - 金额为**估算值**（内置单价表 × 实际 token 四桶），非 provider 账单；单价以官方最新价为准，请自行核对（内置 USD 价暂按 7.2 汇率折算，待核）。
 - 金额同时按 CNY 与 USD 估算并同屏展示；两种货币的单价独立配置。
 - `reasoningTokens` 是输出子类，不会重复计入金额。
 - 两种货币都未配置单价的模型：token 照常统计，金额不计入，页面提示「未配置」。
-- 聚合在 node 半内存完成，仅 30s 短时缓存；数据量极大时首次加载可能仍需数秒。
+- 聚合在 node 半内存完成，仅 30s 短时缓存；数据量极大时首次加载可能仍需数秒（此后切换范围由客户端预取缓存即时渲染）。

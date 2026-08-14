@@ -50,4 +50,82 @@ describe('UsageStatsStore', () => {
     await store.refresh()
     expect(calls).toEqual([30, 30])
   })
+
+  it('serves a second load of the same window from cache without re-fetching', async () => {
+    const calls: number[] = []
+    const store = new UsageStatsStore(async (days) => { calls.push(days); return { ...RESPONSE, days } })
+    await store.load(7)
+    await store.load(7)
+    expect(calls).toEqual([7])
+    const state = store.store.getSnapshot()
+    expect(state.status).toBe('ready')
+    expect(state.data?.days).toBe(7)
+  })
+
+  it('a cached window renders instantly: no loading state on the switch', async () => {
+    const store = new UsageStatsStore(async (days) => ({ ...RESPONSE, days }))
+    await store.load(15)
+    const switchPromise = store.load(15)
+    // The cache hit must publish before any await crosses the microtask queue.
+    expect(store.store.getSnapshot().status).toBe('ready')
+    await switchPromise
+  })
+
+  it('prefetch warms a window without touching the visible snapshot', async () => {
+    const calls: number[] = []
+    const store = new UsageStatsStore(async (days) => { calls.push(days); return { ...RESPONSE, days } })
+    await store.load(7)
+    await store.prefetch(30)
+    // Snapshot still describes the visible window…
+    expect(store.store.getSnapshot().days).toBe(7)
+    // …but switching is now served from cache without another fetch.
+    await store.load(30)
+    expect(calls).toEqual([7, 30])
+  })
+
+  it('a failed prefetch is silent and a later load retries', async () => {
+    let failures = 1
+    const store = new UsageStatsStore(async (days) => {
+      if (days === 30 && failures > 0) { failures -= 1; throw new Error('boom') }
+      return { ...RESPONSE, days }
+    })
+    await store.prefetch(30)
+    expect(store.store.getSnapshot().status).toBe('idle')
+    await store.load(30)
+    expect(store.store.getSnapshot().status).toBe('ready')
+  })
+
+  it('refresh bypasses the cache and updates it', async () => {
+    const calls: number[] = []
+    let version = 1
+    const store = new UsageStatsStore(async (days) => {
+      calls.push(days)
+      return { ...RESPONSE, days, generatedAt: version }
+    })
+    await store.load(7)
+    version = 2
+    await store.refresh()
+    expect(calls).toEqual([7, 7])
+    expect(store.store.getSnapshot().data?.generatedAt).toBe(2)
+  })
+
+  it('clearCache drops every window; the next load re-fetches', async () => {
+    const calls: number[] = []
+    const store = new UsageStatsStore(async (days) => { calls.push(days); return { ...RESPONSE, days } })
+    await store.load(7)
+    store.clearCache()
+    await store.load(7)
+    expect(calls).toEqual([7, 7])
+  })
+
+  it('concurrent loads of the same window share one in-flight fetch', async () => {
+    const calls: number[] = []
+    const store = new UsageStatsStore(async (days) => {
+      calls.push(days)
+      await new Promise(resolve => setTimeout(resolve, 5))
+      return { ...RESPONSE, days }
+    })
+    await Promise.all([store.load(7), store.load(7), store.load(7)])
+    expect(calls).toEqual([7])
+  })
 })

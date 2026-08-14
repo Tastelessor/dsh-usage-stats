@@ -1,6 +1,33 @@
 /** Price table resolution: per-currency defaults exist and configured entries win. */
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_PRICES_CNY, DEFAULT_PRICES_USD, resolveCurrency, resolvePriceTable, resolvePriceTables } from '../src/host/config.ts'
+import { ConfigSchema, DEFAULT_PRICES_CNY, DEFAULT_PRICES_USD, resolveCurrency, resolvePriceTable, resolvePriceTables } from '../src/host/config.ts'
+
+describe('ConfigSchema', () => {
+  it('accepts per-currency entries with cny or usd independently absent', () => {
+    // The settings seam validates every write with this schema; a cny-only
+    // overlay (the price editor's normal first save) must resolve.
+    const out = ConfigSchema({
+      models: {
+        'deepseek-v4-flash': {
+          cny: { inputPerM: 0.33, cacheReadPerM: 0.03, outputPerM: 0.5, cacheWritePerM: 0.33 },
+        },
+        'other-model': {
+          usd: { inputPerM: 0.05, cacheReadPerM: 0.005, outputPerM: 0.08, cacheWritePerM: 0.05 },
+        },
+      },
+    })
+    const models = out.models ?? {}
+    expect(models['deepseek-v4-flash']?.cny?.inputPerM).toBe(0.33)
+    expect(models['deepseek-v4-flash']?.usd).toBeUndefined()
+    expect(models['other-model']?.usd?.inputPerM).toBe(0.05)
+  })
+
+  it('accepts an empty models dict and defaults the currency', () => {
+    const out = ConfigSchema({})
+    expect(out.currency).toBe('CNY')
+    expect(out.models).toEqual({})
+  })
+})
 
 describe('price defaults', () => {
   it('ships CNY and USD defaults for deepseek-v4-flash and deepseek-v4-pro', () => {
