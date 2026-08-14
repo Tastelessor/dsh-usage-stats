@@ -6,11 +6,14 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { installSettingsSection } from '@deepseek-ai/dsh-settings'
-import { ConfigSchema, NS, type Config } from './config.ts'
+// Loads the '@deepseek-ai/cordis' Context augmentation that types ctx.webServer.
+import type {} from '@deepseek-ai/dsh-host-webserver'
+import { ConfigSchema, NS, resolveCurrency, resolvePriceTable, type Config } from './config.ts'
+import { createStatsHandler } from './stats-route.ts'
 
 export const name = 'dsh-usage-stats'
 
-/** Host services this plugin depends on (filled in later tasks). */
+/** Host services this plugin depends on. */
 export const inject = ['llm', 'sessionQuery', 'webServer']
 
 export function apply(ctx: Context, config: Config): void {
@@ -23,5 +26,20 @@ export function apply(ctx: Context, config: Config): void {
     },
     onChange: () => {},
   })
+  const llm = ctx.llm
+  const sessionQuery = ctx.sessionQuery
+  const prices = (): ReturnType<typeof resolvePriceTable> => resolvePriceTable(current())
+  const handler = createStatsHandler({
+    listSessions: (signal?: AbortSignal) => sessionQuery.listSessions(signal),
+    readSession: (sessionId) => sessionQuery.readSession(sessionId),
+    listProviders: () => llm.listProviders(),
+    listModels: (provider) => llm.listModels(provider),
+    prices,
+    currency: () => resolveCurrency(config),
+  })
+  ctx.effect(
+    () => ctx.webServer.register({ kind: 'prefix', path: '/dsh-usage-stats', handler }),
+    'dsh-usage-stats: stats route',
+  )
   ctx.logger.info('dsh-usage-stats: host half loaded')
 }
