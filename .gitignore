@@ -1,6 +1,7 @@
 # Local tooling / private working docs (not part of the published repo)
 .gitnexus/
 superpowers/
+.superpowers/
 
 # Dependencies
 node_modules/

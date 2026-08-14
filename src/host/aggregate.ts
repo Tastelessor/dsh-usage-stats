@@ -96,11 +96,6 @@ export function aggregateUsage(
     tot.total += usage.inputTokens + usage.outputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0)
   }
 
-  for (const bucket of buckets) {
-    if (bucket.amount === null || !(bucket.tokens.total > 0)) continue
-    bucket.amount = bucket.amount // amount already carries only priced contributions
-  }
-
   return {
     buckets,
     totals: {

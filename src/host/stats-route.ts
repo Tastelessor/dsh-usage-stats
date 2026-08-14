@@ -67,11 +67,21 @@ export function modelRows(
 export function createStatsHandler(deps: StatsDeps): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
   return async (req, res) => {
     if (req.method !== 'GET') {
-      res.writeHead(405)
+      res.writeHead(405, {
+        allow: 'GET',
+        'content-type': 'text/plain; charset=utf-8',
+      })
       res.end()
       return
     }
-    const url = new URL(req.url ?? '/', 'http://dsh.internal')
+    let url: URL
+    try {
+      url = new URL(req.url ?? '/', 'http://dsh.internal')
+    } catch {
+      res.writeHead(400)
+      res.end()
+      return
+    }
     const days = parseDays(url.searchParams.get('days'))
 
     const now = deps.now?.() ?? Date.now()

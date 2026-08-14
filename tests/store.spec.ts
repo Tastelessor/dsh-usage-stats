@@ -36,11 +36,14 @@ describe('UsageStatsStore', () => {
     await store.load(30)          // fast — wins
     resolveSlow(RESPONSE)
     await first
-    expect(store.store.getSnapshot().days).toBe(30)
+    const state = store.store.getSnapshot()
+    expect(state.days).toBe(30)
+    expect(state.data?.days).toBe(30)
+    expect(state.status).toBe('ready')
   })
 
   it('refresh re-fetches the current days', async () => {
-    let calls: number[] = []
+    const calls: number[] = []
     const store = new UsageStatsStore(async (days) => { calls.push(days); return { ...RESPONSE, days } })
     await store.load(30)
     await store.refresh()

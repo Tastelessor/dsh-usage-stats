@@ -35,7 +35,7 @@ export function apply(ctx: Context, config: Config): void {
     listProviders: () => llm.listProviders(),
     listModels: (provider) => llm.listModels(provider),
     prices,
-    currency: () => resolveCurrency(config),
+    currency: () => resolveCurrency(current()),
   })
   ctx.effect(
     () => ctx.webServer.register({ kind: 'prefix', path: '/dsh-usage-stats', handler }),

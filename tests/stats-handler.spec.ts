@@ -22,10 +22,6 @@ function request(deps: Partial<StatsDeps> = {}, query = 'days=7') {
     now: () => new Date('2026-08-14T12:00:00').getTime(),
     ...deps,
   })
-  const res = {
-    writeHead(status: number) { captured.status = status },
-    end(body: string) { captured.body = body },
-  } as unknown as ServerResponse
   const req = { method: 'GET', url: `/dsh-usage-stats/stats?${query}` } as IncomingMessage
   return { handler, captured, req }
 }

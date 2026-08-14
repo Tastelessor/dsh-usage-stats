@@ -14,6 +14,8 @@ export interface UsageStatsSectionProps {
 
 const RANGES = [7, 15, 30] as const
 
+type SeriesKey = 'total' | 'input' | 'output' | 'cacheRead' | 'cacheWrite' | 'reasoning'
+
 const formatTokens = (value: number): string => {
   if (value >= 1e6) return `${(value / 1e6).toFixed(1)}M`
   if (value >= 1e3) return `${(value / 1e3).toFixed(1)}k`
@@ -32,14 +34,14 @@ function series(buckets: { date: string; tokens: TokenTotals }[], pick: (t: Toke
 /** The full usage-stats page body. */
 export function UsageStatsSection({ controller, useSnapshot, t }: UsageStatsSectionProps): JSX.Element {
   const snapshot = useSnapshot()
-  const [seriesKey, setSeriesKey] = useState<'total' | 'input' | 'output' | 'cacheRead' | 'cacheWrite' | 'reasoning'>('total')
+  const [seriesKey, setSeriesKey] = useState<SeriesKey>('total')
 
   if (snapshot.status === 'loading' || snapshot.status === 'idle') return <div>{t('loading')}</div>
   if (snapshot.status === 'error') return <div className="stats-error">{t('error')}: {snapshot.error}</div>
 
   const data = snapshot.data!
   const currency = data.currency
-  const pick: Record<string, (t: TokenTotals) => number> = {
+  const pick: Record<SeriesKey, (t: TokenTotals) => number> = {
     total: t => t.total,
     input: t => t.input,
     output: t => t.output,
