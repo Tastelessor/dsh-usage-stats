@@ -5,6 +5,9 @@ superpowers/
 # Dependencies
 node_modules/
 
+# Local pnpm content-addressable store (created when no global store is set)
+.pnpm-store/
+
 # Build output
 # lib/ is the publish artifact (package.json "files"), built by `prepare`
 # on GitHub install and before `pnpm publish`; never committed.
