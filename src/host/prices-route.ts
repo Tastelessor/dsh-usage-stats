@@ -12,7 +12,8 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { Currency, ModelPrice, ModelPricesByCurrency } from '../shared/types.ts'
+import { normalizeTiered } from './config.ts'
+import type { Currency, ModelPrice, ModelPricesByCurrency, TieredModelPrice } from '../shared/types.ts'
 
 /** Everything the route needs from the host; faked directly in tests. */
 export interface PricesDeps {
@@ -20,7 +21,7 @@ export interface PricesDeps {
    * Persist the merged per-currency models dict. Rejects (throw) when the
    * settings seam refuses the write; the handler answers that as a 400.
    */
-  writePrices(currency: Currency, prices: Record<string, ModelPrice>): Promise<void>
+  writePrices(currency: Currency, prices: Record<string, TieredModelPrice>): Promise<void>
 }
 
 const CURRENCIES = new Set<Currency>(['CNY', 'USD'])
@@ -32,7 +33,7 @@ const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' } as co
 export function mergePrices(
   base: Record<string, ModelPricesByCurrency> | undefined,
   currency: Currency,
-  prices: Record<string, ModelPrice>,
+  prices: Record<string, TieredModelPrice>,
 ): Record<string, ModelPricesByCurrency> {
   const models: Record<string, ModelPricesByCurrency> = { ...(base ?? {}) }
   for (const [id, price] of Object.entries(prices)) {
@@ -50,8 +51,15 @@ function isModelPrice(value: unknown): value is ModelPrice {
   })
 }
 
+/** Accept the tiered {peak, offPeak} write and the flat (legacy) form, normalized. */
+function isTieredModelPrice(value: unknown): value is TieredModelPrice {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const record = value as { peak?: unknown; offPeak?: unknown }
+  return isModelPrice(record.peak) && isModelPrice(record.offPeak)
+}
+
 /** Parse the {currency, prices} body; one discriminated outcome, no throws. */
-function parseBody(raw: string): { currency: Currency; prices: Record<string, ModelPrice> } | { error: string } {
+function parseBody(raw: string): { currency: Currency; prices: Record<string, TieredModelPrice> } | { error: string } {
   let body: unknown
   try {
     body = JSON.parse(raw)
@@ -66,10 +74,15 @@ function parseBody(raw: string): { currency: Currency; prices: Record<string, Mo
   if (typeof record.prices !== 'object' || record.prices === null || Array.isArray(record.prices)) {
     return { error: 'prices must be an object of model id → price' }
   }
-  const prices: Record<string, ModelPrice> = {}
+  const prices: Record<string, TieredModelPrice> = {}
   for (const [id, price] of Object.entries(record.prices)) {
-    if (!isModelPrice(price)) return { error: `invalid price for model "${id}"` }
-    prices[id] = price
+    if (isTieredModelPrice(price)) {
+      prices[id] = price
+    } else if (isModelPrice(price)) {
+      prices[id] = normalizeTiered(price)
+    } else {
+      return { error: `invalid price for model "${id}": expected {peak, offPeak} or a flat price` }
+    }
   }
   return { currency: record.currency as Currency, prices }
 }

@@ -1,13 +1,28 @@
-/** Per-day aggregation: bucketing, zero-fill, dual-currency amounts, metrics. */
+/** Per-day aggregation: bucketing, zero-fill, dual-currency amounts, tier-aware billing. */
 import { describe, expect, it } from 'vitest'
 import { aggregateUsage, localDayKey, windowStartMs, type UsageSample } from '../src/host/aggregate.ts'
-import type { ModelPrice } from '../src/shared/types.ts'
+import { tierOf } from '../src/host/prices.ts'
+import type { TieredModelPrice } from '../src/shared/types.ts'
 
-const CNY: Record<string, ModelPrice> = {
-  'deepseek-v4-flash': { inputPerM: 1, cacheReadPerM: 0.1, outputPerM: 2, cacheWritePerM: 0.5 },
+const CNY: Record<string, TieredModelPrice> = {
+  'deepseek-v4-flash': {
+    peak: { inputPerM: 1, cacheReadPerM: 0.1, outputPerM: 2, cacheWritePerM: 0.5 },
+    offPeak: { inputPerM: 1, cacheReadPerM: 0.1, outputPerM: 2, cacheWritePerM: 0.5 },
+  },
 }
-const USD: Record<string, ModelPrice> = {
-  'deepseek-v4-flash': { inputPerM: 0.2, cacheReadPerM: 0.02, outputPerM: 0.4, cacheWritePerM: 0.1 },
+const USD: Record<string, TieredModelPrice> = {
+  'deepseek-v4-flash': {
+    peak: { inputPerM: 0.2, cacheReadPerM: 0.02, outputPerM: 0.4, cacheWritePerM: 0.1 },
+    offPeak: { inputPerM: 0.2, cacheReadPerM: 0.02, outputPerM: 0.4, cacheWritePerM: 0.1 },
+  },
+}
+
+/** Distinct-tier table used by the tier-aware billing test. */
+const TIERED_CNY: Record<string, TieredModelPrice> = {
+  'deepseek-v4-flash': {
+    peak: { inputPerM: 3, cacheReadPerM: 0.3, outputPerM: 6, cacheWritePerM: 0.6 },
+    offPeak: { inputPerM: 1, cacheReadPerM: 0.1, outputPerM: 2, cacheWritePerM: 0.2 },
+  },
 }
 
 const at = (date: string, h = 12): number => new Date(`${date}T${String(h).padStart(2, '0')}:00:00`).getTime()
@@ -49,6 +64,25 @@ describe('aggregateUsage', () => {
     expect(out.totals.amountCny).toBeCloseTo(3.1)
     expect(out.totals.amountUsd).toBeCloseTo(0.62)
     expect(out.unpricedModels).toEqual([])
+  })
+
+  it('bills each call at the tier of its own event time (Beijing peak/off-peak)', () => {
+    const PEAK = Date.UTC(2026, 7, 13, 1, 0, 0)  // Beijing 09:00 → peak
+    const OFF = Date.UTC(2026, 7, 13, 20, 0, 0)  // Beijing 04:00 → off-peak
+    expect(tierOf(PEAK)).toBe('peak')
+    expect(tierOf(OFF)).toBe('offPeak')
+    const samples: UsageSample[] = [
+      { time: PEAK, provider: 'deepseek-official', model: 'deepseek-v4-flash',
+        usage: { inputTokens: 1_000_000, outputTokens: 500_000 } },
+      { time: OFF, provider: 'deepseek-official', model: 'deepseek-v4-flash',
+        usage: { inputTokens: 1_000_000, outputTokens: 500_000 } },
+    ]
+    const out = aggregateUsage(samples, { cny: TIERED_CNY, usd: {} }, 7, Date.UTC(2026, 7, 14, 2, 0, 0))
+    const peakBucket = out.buckets.find(b => b.date === localDayKey(PEAK))
+    const offBucket = out.buckets.find(b => b.date === localDayKey(OFF))
+    expect(peakBucket?.amountCny).toBeCloseTo(6) // 1M/1e6*3 + 500k/1e6*6
+    expect(offBucket?.amountCny).toBeCloseTo(2)  // 1M/1e6*1 + 500k/1e6*2
+    expect(out.totals.amountCny).toBeCloseTo(8)
   })
 
   it('computes the average daily tokens and the cache hit rate', () => {

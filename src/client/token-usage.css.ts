@@ -28,7 +28,8 @@ export const css = `
 .price-table-wrap { border: 1px solid var(--dsw-color-border, #d0d7de); border-radius: 8px; padding: 12px; }
 .price-table-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .price-table-title { font-size: 13px; font-weight: 600; }
-.price-currency-toggle { display: flex; gap: 6px; }
+.price-currency-toggle { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.price-peak-hint { font-size: 11px; color: var(--dsw-color-text-muted, #6e7781); margin: -2px 0 6px; }
 .price-table { border-collapse: collapse; width: 100%; }
 .price-table th, .price-table td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--dsw-color-border, #d0d7de); font-size: 13px; }
 .price-input { width: 88px; padding: 3px 6px; border: 1px solid var(--dsw-color-border, #d0d7de); border-radius: 4px; font-size: 12px; background: var(--dsw-surface-bg, #ffffff); color: var(--dsw-color-text, #1f2328); }

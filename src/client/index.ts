@@ -23,7 +23,7 @@ import { TokenUsageStore } from './store.ts'
 import type { TokenUsageState } from './store.ts'
 import { zh, en, type TokenUsageKey } from './locales.ts'
 import { injectTokenUsageCss } from './token-usage.css.ts'
-import type { Currency, ModelPrice } from '../shared/types.ts'
+import type { Currency, TieredModelPrice } from '../shared/types.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -66,7 +66,7 @@ export function apply(ctx: ClientContext): void {
   // Price-editor write-back: the host merges the edited currency's prices
   // over its resolved config and persists through the settings seam, then
   // busts the response caches so the next fetch reflects the new prices.
-  const savePrices = async (currency: Currency, prices: Record<string, ModelPrice>): Promise<void> => {
+  const savePrices = async (currency: Currency, prices: Record<string, TieredModelPrice>): Promise<void> => {
     const response = await fetch('/dsh-token-usage/prices', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

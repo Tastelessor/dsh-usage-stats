@@ -6,7 +6,7 @@
  */
 
 import type { TokenUsage } from '@deepseek-ai/dsh-llm'
-import type { DayBucket, ModelPrice, StatsTotals, TokenTotals, UnpricedModel } from '../shared/types.ts'
+import type { DayBucket, StatsTotals, TieredModelPrice, TokenTotals, UnpricedModel } from '../shared/types.ts'
 import { amountBreakdown } from './prices.ts'
 
 /** One model call's usage facts extracted from a session event. */
@@ -27,8 +27,8 @@ export interface Aggregation {
 
 /** Both currency price tables; a model missing from one only contributes to the other's amounts. */
 export interface PriceTables {
-  cny: Readonly<Record<string, ModelPrice>>
-  usd: Readonly<Record<string, ModelPrice>>
+  cny: Readonly<Record<string, TieredModelPrice>>
+  usd: Readonly<Record<string, TieredModelPrice>>
 }
 
 const EMPTY_TOTALS = (): TokenTotals => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, total: 0 })
@@ -94,14 +94,14 @@ export function aggregateUsage(
 
     const cnyPrice = prices.cny[sample.model]
     if (cnyPrice !== undefined) {
-      const amount = amountBreakdown(usage, cnyPrice).total
+      const amount = amountBreakdown(usage, cnyPrice, sample.time).total
       bucket.amountCny = (bucket.amountCny ?? 0) + amount
       totals.amountCny = (totals.amountCny ?? 0) + amount
       cnyPriced += 1
     }
     const usdPrice = prices.usd[sample.model]
     if (usdPrice !== undefined) {
-      const amount = amountBreakdown(usage, usdPrice).total
+      const amount = amountBreakdown(usage, usdPrice, sample.time).total
       bucket.amountUsd = (bucket.amountUsd ?? 0) + amount
       totals.amountUsd = (totals.amountUsd ?? 0) + amount
       usdPriced += 1

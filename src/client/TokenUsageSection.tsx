@@ -3,14 +3,14 @@ import { useState } from 'react'
 import type { TokenUsageStore, TokenUsageState } from './store.ts'
 import { LineChart, type ChartSeries } from './LineChart.tsx'
 import { PriceTable } from './PriceTable.tsx'
-import type { Currency, ModelPrice, TokenTotals } from '../shared/types.ts'
+import type { Currency, TieredModelPrice, TokenTotals } from '../shared/types.ts'
 
 export interface TokenUsageSectionProps {
   controller: TokenUsageStore
   useSnapshot: () => TokenUsageState
   t: (key: string) => any
   /** Persist edited prices for one currency (settings write + refresh). */
-  onSavePrices: (currency: Currency, prices: Record<string, ModelPrice>) => Promise<void>
+  onSavePrices: (currency: Currency, prices: Record<string, TieredModelPrice>) => Promise<void>
 }
 
 const RANGES = [7, 15, 30] as const

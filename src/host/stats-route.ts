@@ -14,7 +14,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { LlmModelInfo, LlmProviderInfo } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import type { Currency, ModelPrice, ModelPriceRow, StatsResponse } from '../shared/types.ts'
+import type { Currency, ModelPriceRow, StatsResponse, TieredModelPrice } from '../shared/types.ts'
 import { aggregateUsage, windowStartMs } from './aggregate.ts'
 import { usageSamplesOf } from './samples.ts'
 
@@ -40,8 +40,8 @@ export interface StatsDeps {
   loadEvents(source: SessionSource): Promise<readonly SessionEvent[]>
   listProviders(): readonly LlmProviderInfo[]
   listModels(provider: string): Promise<readonly LlmModelInfo[]>
-  pricesCny(): Readonly<Record<string, ModelPrice>>
-  pricesUsd(): Readonly<Record<string, ModelPrice>>
+  pricesCny(): Readonly<Record<string, TieredModelPrice>>
+  pricesUsd(): Readonly<Record<string, TieredModelPrice>>
   currency(): Currency
   now?(): number
   /** Max concurrent session log loads; default 8. */
@@ -88,8 +88,8 @@ export function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T)
 export function modelRows(
   providers: readonly LlmProviderInfo[],
   listModels: (provider: string) => Promise<readonly LlmModelInfo[]>,
-  pricesCny: Readonly<Record<string, ModelPrice>>,
-  pricesUsd: Readonly<Record<string, ModelPrice>>,
+  pricesCny: Readonly<Record<string, TieredModelPrice>>,
+  pricesUsd: Readonly<Record<string, TieredModelPrice>>,
 ): Promise<ModelPriceRow[]> {
   return Promise.all(providers.map(async (provider) => {
     let models: readonly LlmModelInfo[]

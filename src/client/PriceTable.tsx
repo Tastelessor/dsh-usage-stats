@@ -1,6 +1,6 @@
-/** Model price table: per-currency prices (CNY/USD), inline editing, save-back. */
+/** Model price table: per-currency × per-period (peak/off-peak) prices, inline editing, save-back. */
 import { useState } from 'react'
-import type { Currency, ModelPrice, ModelPriceRow, UnpricedModel } from '../shared/types.ts'
+import type { Currency, ModelPrice, ModelPriceRow, Tier, TieredModelPrice, UnpricedModel } from '../shared/types.ts'
 
 export interface PriceTableProps {
   models: readonly ModelPriceRow[]
@@ -8,12 +8,17 @@ export interface PriceTableProps {
   /** Preferred currency; seeds the edit toggle. */
   currency: Currency
   t: (key: string) => any
-  /** Persist the edited prices for one currency; resolves after the settings write. */
-  onSavePrices: (currency: Currency, prices: Record<string, ModelPrice>) => Promise<void>
+  /** Persist the edited prices for one currency (both tiers); resolves after the settings write. */
+  onSavePrices: (currency: Currency, prices: Record<string, TieredModelPrice>) => Promise<void>
 }
 
 const SYMBOL: Record<Currency, string> = { CNY: '¥', USD: '$' }
 const CURRENCIES: readonly Currency[] = ['CNY', 'USD']
+const TIERS: readonly Tier[] = ['peak', 'offPeak']
+
+const ZERO: ModelPrice = { inputPerM: 0, cacheReadPerM: 0, outputPerM: 0, cacheWritePerM: 0 }
+/** Shown/edited placeholder while a model has no configured price in the selected currency. */
+const EMPTY_TIERED: TieredModelPrice = { peak: { ...ZERO }, offPeak: { ...ZERO } }
 
 /** Turn a price row's number cell into an editable input. */
 function PriceInput({ value, onChange, saving }: {
@@ -40,25 +45,30 @@ function PriceInput({ value, onChange, saving }: {
   )
 }
 
-/** Render one row per catalog model with a per-currency editor. */
+/** Render one row per catalog model with a per-currency × per-period editor. */
 export function PriceTable({ models, unpricedModels, currency, t, onSavePrices }: PriceTableProps): JSX.Element {
   const [editCurrency, setEditCurrency] = useState<Currency>(currency)
-  const [drafts, setDrafts] = useState<Record<Currency, Record<string, ModelPrice>>>({ CNY: {}, USD: {} })
+  const [editTier, setEditTier] = useState<Tier>('offPeak')
+  const [drafts, setDrafts] = useState<Record<Currency, Record<string, TieredModelPrice>>>({ CNY: {}, USD: {} })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const priceOf = (row: ModelPriceRow): ModelPrice | null => editCurrency === 'CNY' ? row.cny : row.usd
-  const draftOf = (row: ModelPriceRow): ModelPrice => drafts[editCurrency][row.model] ?? priceOf(row) ?? {
-    inputPerM: 0, cacheReadPerM: 0, outputPerM: 0, cacheWritePerM: 0,
-  }
+  const tieredOf = (row: ModelPriceRow): TieredModelPrice | null => editCurrency === 'CNY' ? row.cny : row.usd
+  /** Complete tiered price as edited (or resolved, or empty when unconfigured). */
+  const draftOf = (row: ModelPriceRow): TieredModelPrice =>
+    drafts[editCurrency][row.model] ?? tieredOf(row) ?? EMPTY_TIERED
   const setDraft = (row: ModelPriceRow, patch: Partial<ModelPrice>): void => {
-    setDrafts(d => ({
-      ...d,
-      [editCurrency]: {
-        ...d[editCurrency],
-        [row.model]: { ...draftOf(row), ...patch },
-      },
-    }))
+    setDrafts(d => {
+      const currencyDrafts = d[editCurrency] ?? {}
+      const base = currencyDrafts[row.model] ?? tieredOf(row) ?? EMPTY_TIERED
+      return {
+        ...d,
+        [editCurrency]: {
+          ...currencyDrafts,
+          [row.model]: { ...base, [editTier]: { ...base[editTier], ...patch } },
+        },
+      }
+    })
   }
 
   const save = async (): Promise<void> => {
@@ -85,8 +95,15 @@ export function PriceTable({ models, unpricedModels, currency, t, onSavePrices }
               {SYMBOL[c]} {c}
             </button>
           ))}
+          {TIERS.map(tier => (
+            <button key={tier} className={editTier === tier ? 'currency-btn active' : 'currency-btn'}
+              onClick={() => setEditTier(tier)}>
+              {t(tier === 'peak' ? 'priceTierPeak' : 'priceTierOffPeak')}
+            </button>
+          ))}
         </div>
       </div>
+      <div className="price-peak-hint">{t('peakHint')}</div>
       {models.length === 0 && unpricedModels.length === 0
         ? <div className="price-empty">{t('empty')}</div>
         : (
@@ -102,13 +119,14 @@ export function PriceTable({ models, unpricedModels, currency, t, onSavePrices }
             <tbody>
               {models.map(row => {
                 const draft = draftOf(row)
+                const tier = draft[editTier]
                 const hasDraft = drafts[editCurrency][row.model] !== undefined
                 return (
                   <tr key={`${row.provider}/${row.model}`} className={hasDraft ? 'price-row-editing' : undefined}>
                     <td>{row.name}</td>
-                    <td><PriceInput key={`${editCurrency}/cacheRead`} value={priceOf(row)?.cacheReadPerM ?? null} saving={saving} onChange={v => setDraft(row, { cacheReadPerM: v })} /></td>
-                    <td><PriceInput key={`${editCurrency}/input`} value={priceOf(row)?.inputPerM ?? null} saving={saving} onChange={v => setDraft(row, { inputPerM: v })} /></td>
-                    <td><PriceInput key={`${editCurrency}/output`} value={priceOf(row)?.outputPerM ?? null} saving={saving} onChange={v => setDraft(row, { outputPerM: v })} /></td>
+                    <td><PriceInput key={`${editCurrency}/${editTier}/cacheRead`} value={tieredOf(row) !== null ? tier.cacheReadPerM : null} saving={saving} onChange={v => setDraft(row, { cacheReadPerM: v })} /></td>
+                    <td><PriceInput key={`${editCurrency}/${editTier}/input`} value={tieredOf(row) !== null ? tier.inputPerM : null} saving={saving} onChange={v => setDraft(row, { inputPerM: v })} /></td>
+                    <td><PriceInput key={`${editCurrency}/${editTier}/output`} value={tieredOf(row) !== null ? tier.outputPerM : null} saving={saving} onChange={v => setDraft(row, { outputPerM: v })} /></td>
                   </tr>
                 )
               })}

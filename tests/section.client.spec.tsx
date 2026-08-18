@@ -1,14 +1,23 @@
 // @vitest-environment jsdom
-/** Page renders charts, price table, empty state, range switching, tooltips, editing. */
+/** Page renders charts, price table, empty state, range switching, tooltips, tiered editing. */
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { TokenUsageSection } from '../src/client/TokenUsageSection.tsx'
 import { LineChart } from '../src/client/LineChart.tsx'
-import type { Currency, ModelPrice, StatsResponse } from '../src/shared/types.ts'
+import type { Currency, StatsResponse, TieredModelPrice } from '../src/shared/types.ts'
 
 // vitest globals are off here, so RTL's auto-cleanup never registers; the
 // spec renders repeatedly, and getByText requires unique matches.
 afterEach(cleanup)
+
+const TIERED_CNY: TieredModelPrice = {
+  peak: { inputPerM: 2, cacheReadPerM: 0.2, outputPerM: 4, cacheWritePerM: 0.5 },
+  offPeak: { inputPerM: 1, cacheReadPerM: 0.1, outputPerM: 2, cacheWritePerM: 0.5 },
+}
+const TIERED_USD: TieredModelPrice = {
+  peak: { inputPerM: 0.4, cacheReadPerM: 0.04, outputPerM: 0.8, cacheWritePerM: 0.1 },
+  offPeak: { inputPerM: 0.2, cacheReadPerM: 0.02, outputPerM: 0.4, cacheWritePerM: 0.1 },
+}
 
 const RESPONSE: StatsResponse = {
   days: 7, from: 0, to: 0, generatedAt: 0, currency: 'CNY',
@@ -27,8 +36,8 @@ const RESPONSE: StatsResponse = {
   },
   models: [{
     provider: 'deepseek-official', model: 'deepseek-v4-flash', name: 'DeepSeek-V4-Flash',
-    cny: { inputPerM: 1, cacheReadPerM: 0.1, outputPerM: 2, cacheWritePerM: 0.5 },
-    usd: { inputPerM: 0.2, cacheReadPerM: 0.02, outputPerM: 0.4, cacheWritePerM: 0.1 },
+    cny: TIERED_CNY,
+    usd: TIERED_USD,
   }],
   unpricedModels: [{ provider: 'openai', model: 'gpt-x' }],
 }
@@ -40,14 +49,16 @@ const t = (key: string): any => ({
   chartTokens: 'Token 用量', chartAmount: '金额开销（CNY / USD）', seriesToken: 'Token',
   priceTableTitle: '模型单价（M tokens）',
   priceModel: '模型', priceCacheRead: '输入命中缓存', priceInput: '输入未命中缓存', priceOutput: '输出',
+  priceTierPeak: '高峰时段', priceTierOffPeak: '空闲时段',
+  peakHint: '高峰时段为北京时间 9:00–12:00、14:00–18:00',
   priceNotConfigured: '未配置', priceSave: '保存单价', priceSaving: '保存中…', priceSaveFailed: '保存失败，请重试',
-  priceEditHint: '编辑输入框后点击保存；两币种单价分别保存',
+  priceEditHint: '编辑输入框后点击保存；币种与时段分别保存',
   unpricedHint: (n: number) => `${n} 个已使用模型未配置单价`,
   seriesTotal: '总量', seriesInput: '输入', seriesOutput: '输出', seriesCacheRead: '缓存命中',
   seriesCacheWrite: '缓存写入', seriesReasoning: '推理',
 }[key] ?? key)
 
-const renderReady = (overrides: { onSavePrices?: (currency: Currency, prices: Record<string, ModelPrice>) => Promise<void> } = {}) => render(
+const renderReady = (overrides: { onSavePrices?: (currency: Currency, prices: Record<string, TieredModelPrice>) => Promise<void> } = {}) => render(
   <TokenUsageSection controller={{} as never}
     useSnapshot={() => ({ status: 'ready', error: null, days: 7, data: RESPONSE })} t={t}
     onSavePrices={overrides.onSavePrices ?? (async () => {})} />,
@@ -67,18 +78,40 @@ describe('TokenUsageSection', () => {
     expect(screen.getByText('金额开销（CNY / USD）')).toBeTruthy()
   })
 
-  it('renders the price table with both currencies editable', () => {
+  it('renders the price table with currency and tier toggles, defaulting to off-peak', () => {
     renderReady()
     expect(screen.getByText('DeepSeek-V4-Flash')).toBeTruthy()
     const inputs = screen.getAllByRole('spinbutton')
     expect(inputs.length).toBe(3) // cacheRead/input/output for one model
+    expect((inputs[0] as HTMLInputElement).value).toBe('0.1') // off-peak cacheRead
+    expect((inputs[1] as HTMLInputElement).value).toBe('1')   // off-peak input
+    expect((inputs[2] as HTMLInputElement).value).toBe('2')   // off-peak output
     expect(screen.getByText('¥ CNY')).toBeTruthy()
     expect(screen.getByText('$ USD')).toBeTruthy()
+    expect(screen.getByText('高峰时段')).toBeTruthy()
+    expect(screen.getByText('空闲时段')).toBeTruthy()
     expect(screen.getByText('gpt-x')).toBeTruthy()
     expect(screen.getByText('1 个已使用模型未配置单价')).toBeTruthy()
   })
 
-  it('persists edited prices for the selected currency', async () => {
+  it('switches the price table to the peak tier', () => {
+    renderReady()
+    fireEvent.click(screen.getByText('高峰时段'))
+    const inputs = screen.getAllByRole('spinbutton')
+    expect((inputs[0] as HTMLInputElement).value).toBe('0.2') // peak cacheRead
+    expect((inputs[1] as HTMLInputElement).value).toBe('2')   // peak input
+    expect((inputs[2] as HTMLInputElement).value).toBe('4')   // peak output
+  })
+
+  it('switches the price-table currency to USD', () => {
+    renderReady()
+    fireEvent.click(screen.getByText('$ USD'))
+    const inputs = screen.getAllByRole('spinbutton')
+    expect((inputs[0] as HTMLInputElement).value).toBe('0.02') // usd off-peak cacheRead
+    expect((inputs[2] as HTMLInputElement).value).toBe('0.4')  // usd off-peak output
+  })
+
+  it('persists an edited off-peak price as a full tiered object, leaving the peak tier intact', async () => {
     let saved: unknown
     renderReady({ onSavePrices: async (currency, prices) => { saved = { currency, prices } } })
     const inputs = screen.getAllByRole('spinbutton')
@@ -86,16 +119,25 @@ describe('TokenUsageSection', () => {
     fireEvent.click(screen.getByText('保存单价'))
     expect(saved).toEqual({
       currency: 'CNY',
-      prices: { 'deepseek-v4-flash': { cacheReadPerM: 0.33, inputPerM: 1, outputPerM: 2, cacheWritePerM: 0.5 } },
+      prices: {
+        'deepseek-v4-flash': {
+          peak: TIERED_CNY.peak,
+          offPeak: { ...TIERED_CNY.offPeak, cacheReadPerM: 0.33 },
+        },
+      },
     })
   })
 
-  it('switches the price-table currency to USD', () => {
-    renderReady()
-    fireEvent.click(screen.getByText('$ USD'))
+  it('saves an edited peak-tier price without touching the off-peak tier', async () => {
+    let saved: unknown
+    renderReady({ onSavePrices: async (currency, prices) => { saved = { currency, prices } } })
+    fireEvent.click(screen.getByText('高峰时段'))
     const inputs = screen.getAllByRole('spinbutton')
-    expect((inputs[0] as HTMLInputElement).value).toBe('0.02') // usd cacheRead
-    expect((inputs[2] as HTMLInputElement).value).toBe('0.4')  // usd output
+    fireEvent.change(inputs[2], { target: { value: '9' } })
+    fireEvent.click(screen.getByText('保存单价'))
+    const savedPrices = (saved as { prices: Record<string, TieredModelPrice> }).prices
+    expect(savedPrices['deepseek-v4-flash'].peak.outputPerM).toBe(9)
+    expect(savedPrices['deepseek-v4-flash'].offPeak).toEqual(TIERED_CNY.offPeak)
   })
 
   it('shows the empty state when there is no usage', () => {

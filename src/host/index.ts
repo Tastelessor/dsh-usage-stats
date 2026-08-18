@@ -23,7 +23,7 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import { ConfigSchema, NS, resolveCurrency, resolvePriceTables, type Config } from './config.ts'
 import { createStatsHandler, type SessionSource } from './stats-route.ts'
 import { createPricesHandler, mergePrices } from './prices-route.ts'
-import type { Currency, ModelPrice } from '../shared/types.ts'
+import type { Currency, TieredModelPrice } from '../shared/types.ts'
 
 export const name = 'dsh-token-usage'
 
@@ -57,7 +57,7 @@ export function apply(ctx: Context, config: Config): void {
   // merge it over the resolved config and persist through the settings seam
   // in-process. Non-catalog models and the untouched currency survive because
   // the merge starts from the resolved models dict, not the browser's view.
-  const writePrices = async (currency: Currency, prices: Record<string, ModelPrice>): Promise<void> => {
+  const writePrices = async (currency: Currency, prices: Record<string, TieredModelPrice>): Promise<void> => {
     const settings = ctx.get('settings') as SettingsProvider | undefined
     if (settings === undefined) throw new Error('settings service is unavailable')
     const models = mergePrices(current().models, currency, prices)

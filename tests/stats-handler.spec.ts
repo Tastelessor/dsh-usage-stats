@@ -2,13 +2,28 @@
 import { describe, expect, it } from 'vitest'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createStatsHandler, mapLimit, parseDays, type SessionSource, type StatsDeps } from '../src/host/stats-route.ts'
-import type { ModelPrice } from '../src/shared/types.ts'
+import { localDayKey } from '../src/host/aggregate.ts'
+import type { TieredModelPrice } from '../src/shared/types.ts'
 
-const CNY: Record<string, ModelPrice> = {
-  'deepseek-v4-flash': { inputPerM: 1, cacheReadPerM: 0.1, outputPerM: 2, cacheWritePerM: 0.5 },
+/** Equal-tier tables: amounts are timezone-independent, so structure assertions stay stable. */
+const CNY: Record<string, TieredModelPrice> = {
+  'deepseek-v4-flash': {
+    peak: { inputPerM: 1, cacheReadPerM: 0.1, outputPerM: 2, cacheWritePerM: 0.5 },
+    offPeak: { inputPerM: 1, cacheReadPerM: 0.1, outputPerM: 2, cacheWritePerM: 0.5 },
+  },
 }
-const USD: Record<string, ModelPrice> = {
-  'deepseek-v4-flash': { inputPerM: 0.2, cacheReadPerM: 0.02, outputPerM: 0.4, cacheWritePerM: 0.1 },
+const USD: Record<string, TieredModelPrice> = {
+  'deepseek-v4-flash': {
+    peak: { inputPerM: 0.2, cacheReadPerM: 0.02, outputPerM: 0.4, cacheWritePerM: 0.1 },
+    offPeak: { inputPerM: 0.2, cacheReadPerM: 0.02, outputPerM: 0.4, cacheWritePerM: 0.1 },
+  },
+}
+/** Distinct tiers for the peak-hour billing assertion. */
+const TIERED_CNY: Record<string, TieredModelPrice> = {
+  'deepseek-v4-flash': {
+    peak: { inputPerM: 3, cacheReadPerM: 0.1, outputPerM: 6, cacheWritePerM: 0.5 },
+    offPeak: { inputPerM: 1, cacheReadPerM: 0.1, outputPerM: 2, cacheWritePerM: 0.5 },
+  },
 }
 
 const NOW = new Date('2026-08-14T12:00:00').getTime()
@@ -88,7 +103,7 @@ describe('createStatsHandler', () => {
   it('aggregates usage from loaded events into dual-currency amounts', async () => {
     const { handler, captured, req } = request({
       listSessions: async () => [source('s1', new Date('2026-08-14T00:00:00').getTime(), true)],
-      loadEvents: async () => [eventOf('2026-08-14', 1_000_000, 500_000)],
+      loadEvents: async () => [eventOf(new Date('2026-08-14T12:00:00').getTime(), 1_000_000, 500_000)],
     })
     await handler(req, resOf(captured))
     const body = JSON.parse(captured.body)
@@ -96,6 +111,21 @@ describe('createStatsHandler', () => {
     expect(body.totals.amountCny).toBeCloseTo(2)
     expect(body.totals.amountUsd).toBeCloseTo(0.4)
     expect(body.buckets[6].amountCny).toBeCloseTo(2)
+  })
+
+  it('bills peak-hour usage at the peak tier of the model price', async () => {
+    const PEAK = Date.UTC(2026, 7, 14, 1, 30, 0) // Beijing 09:30 → peak
+    const { handler, captured, req } = request({
+      listSessions: async () => [source('s1', 0, true)],
+      loadEvents: async () => [eventOf(PEAK, 1_000_000, 500_000)],
+      pricesCny: () => TIERED_CNY,
+      now: () => Date.UTC(2026, 7, 14, 2, 0, 0),
+    })
+    await handler(req, resOf(captured))
+    const body = JSON.parse(captured.body)
+    const bucket = body.buckets.find((b: { date: string }) => b.date === localDayKey(PEAK))
+    expect(bucket.amountCny).toBeCloseTo(6) // 1M/1e6*3 + 500k/1e6*6
+    expect(body.totals.amountCny).toBeCloseTo(6)
   })
 
   it('rejects non-GET with 405', async () => {
@@ -181,11 +211,11 @@ describe('createStatsHandler', () => {
 })
 
 /** Minimal SessionEvent with a usage-bearing assistant/message payload. */
-function eventOf(date: string, input: number, output: number): never {
+function eventOf(time: number, input: number, output: number): never {
   return {
     type: 'assistant/message',
     seq: 0,
-    time: new Date(`${date}T12:00:00`).getTime(),
+    time,
     data: {
       usage: { inputTokens: input, outputTokens: output },
       message: { source: { kind: 'model', provider: 'deepseek-official', model: 'deepseek-v4-flash' } },
