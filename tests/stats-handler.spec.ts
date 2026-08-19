@@ -103,14 +103,27 @@ describe('createStatsHandler (v2)', () => {
 
   it('serves a cached payload and skips the whole pipeline on a cache hit', async () => {
     let fresh = ''
+    let listSessionsCalls = 0
+    let loadEventsCalls = 0
+    const indexer = new UsageIndexer({
+      listSessions: async () => { listSessionsCalls += 1; return [source('s1', 0, true)] },
+      loadEvents: async () => { loadEventsCalls += 1; return [] },
+      indexPath: () => join(mkdtempSync(join(tmpdir(), 'dsh-tu-route-')), 'index.json'),
+      now: () => NOW,
+    })
     const { handler, captured, req } = request({
+      indexer,
       cache: { get: () => (fresh === '' ? undefined : fresh), set: (p) => { fresh = p } },
     })
     await handler(req, resOf(captured))
     expect(captured.body).toBe(fresh)
+    expect(listSessionsCalls).toBe(1)
+    expect(loadEventsCalls).toBe(1)
     const body1 = captured.body
     await handler(req, resOf(captured))
-    expect(captured.body).toBe(body1)
+    expect(captured.body).toBe(body1) // identical cached body
+    expect(listSessionsCalls).toBe(1) // pipeline NOT re-run on cache hit
+    expect(loadEventsCalls).toBe(1)
   })
 
   it('keeps serving when one session load fails (indexer fault tolerance)', async () => {

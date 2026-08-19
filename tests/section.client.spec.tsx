@@ -84,6 +84,7 @@ describe('TokenUsageSection (interim)', () => {
     fireEvent.click(screen.getByText('高峰时段'))
     expect((screen.getAllByRole('spinbutton')[0] as HTMLInputElement).value).toBe('0.04') // usd peak cacheRead
     expect(screen.getByText('gpt-x')).toBeTruthy()
+    expect(screen.getByText('1 个已使用模型未配置单价')).toBeTruthy() // unpricedModels.length === 1
   })
 
   it('persists an edited off-peak price as a full tiered object, leaving the peak tier intact', async () => {
@@ -140,7 +141,7 @@ describe('TokenUsageSection (interim)', () => {
 describe('Heatmap', () => {
   const buckets = Array.from({ length: 19 }, (_, i) => ({
     date: `2026-08-${String(1 + i).padStart(2, '0')}`,
-    tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, total: i === 18 ? 1_000_000 : 0 },
+    tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, total: i === 18 ? 1_000_000 : i === 0 ? 600_000 : i === 1 ? 300_000 : i === 2 ? 100_000 : 0 },
     amountCny: i === 18 ? 5 : null,
     amountUsd: i === 18 ? 1 : null,
   }))
@@ -160,6 +161,14 @@ describe('Heatmap', () => {
     const future = document.querySelector('[data-date="2026-08-20"]') as HTMLElement
     expect(future.classList.contains('hm-future')).toBe(true)
     expect(future.classList.contains('hm-l4')).toBe(false)
+  })
+
+  it('places relative-quartile bins into their respective color levels', () => {
+    render(<Heatmap buckets={buckets} to={to} t={t} />)
+    // max = 1_000_000 (08-19); ratios: 0.6 → l3, 0.3 → l2, 0.1 → l1
+    expect((document.querySelector('[data-date="2026-08-01"]') as HTMLElement).classList.contains('hm-l3')).toBe(true)
+    expect((document.querySelector('[data-date="2026-08-02"]') as HTMLElement).classList.contains('hm-l2')).toBe(true)
+    expect((document.querySelector('[data-date="2026-08-03"]') as HTMLElement).classList.contains('hm-l1')).toBe(true)
   })
 
   it('shows a tooltip with the day breakdown on hover', () => {
