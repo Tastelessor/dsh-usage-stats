@@ -8,6 +8,10 @@
 import type { TokenUsage } from '@deepseek-ai/dsh-llm'
 import type { DayBucket, StatsTotals, TieredModelPrice, TokenTotals, UnpricedModel } from '../shared/types.ts'
 import { amountBreakdown } from './prices.ts'
+import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionIndexEntry } from './indexer.ts'
+import type { WindowPeriod, WindowSummary } from '../shared/types.ts'
+import { amountOfTotals } from './prices.ts'
 
 /** One model call's usage facts extracted from a session event. */
 export interface UsageSample {
@@ -165,6 +169,111 @@ export function aggregateUsage(
   return {
     buckets,
     totals,
+    unpricedModels: [...unpriced.values()],
+  }
+}
+
+/** v2 aggregation result: day buckets over [from..to] plus three window summaries. */
+export interface AggregationV2 {
+  buckets: DayBucket[]
+  windows: Record<WindowPeriod, WindowSummary>
+  unpricedModels: UnpricedModel[]
+}
+
+/** Split a provider\u0000model composite key back into its parts. */
+function splitModelKey(key: string): { provider: string; model: string } {
+  const sep = key.indexOf('\u0000')
+  return sep >= 0 ? { provider: key.slice(0, sep), model: key.slice(sep + 1) } : { provider: 'unknown', model: key }
+}
+
+function addTotalsInto(target: TokenTotals, source: TokenTotals): void {
+  target.input += source.input
+  target.output += source.output
+  target.cacheRead += source.cacheRead
+  target.cacheWrite += source.cacheWrite
+  target.reasoning += source.reasoning
+  target.total += source.total
+}
+
+/** Sum buckets whose date is >= fromKey (bucket list is date-ascending). */
+function sumFrom(buckets: readonly DayBucket[], fromKey: string, elapsedDays: number): WindowSummary {
+  const tokens = EMPTY_TOTALS()
+  let amountCny: number | null = 0
+  let amountUsd: number | null = 0
+  let cnySeen = false
+  let usdSeen = false
+  for (const bucket of buckets) {
+    if (bucket.date < fromKey) continue
+    addTotalsInto(tokens, bucket.tokens)
+    if (bucket.amountCny !== null) { amountCny += bucket.amountCny; cnySeen = true }
+    if (bucket.amountUsd !== null) { amountUsd += bucket.amountUsd; usdSeen = true }
+  }
+  const promptInput = tokens.input + tokens.cacheRead + tokens.cacheWrite
+  return {
+    tokens,
+    amountCny: cnySeen ? amountCny : null,
+    amountUsd: usdSeen ? amountUsd : null,
+    cacheHitRate: promptInput > 0 ? tokens.cacheRead / promptInput : 0,
+    avgDailyTokens: tokens.total / Math.max(1, elapsedDays),
+  }
+}
+
+/**
+ * Aggregate pre-folded index entries into [from..to] day buckets and the
+ * today/week/month window summaries. Amounts are recomputed from the current
+ * price tables at query time, so price edits never require an index rebuild.
+ */
+export function aggregateEntries(
+  entries: ReadonlyMap<SessionId, SessionIndexEntry>,
+  prices: PriceTables,
+  fromMs: number,
+  toMs: number,
+  now: number,
+): AggregationV2 {
+  // Zero-filled day keys, from..to inclusive.
+  const dateKeys: string[] = []
+  const end = new Date(toMs)
+  end.setHours(0, 0, 0, 0)
+  for (let d = new Date(fromMs); d.getTime() <= end.getTime(); d.setDate(d.getDate() + 1)) {
+    dateKeys.push(localDayKey(d.getTime()))
+  }
+  const indexByDate = new Map(dateKeys.map((date, index) => [date, index]))
+  const buckets: DayBucket[] = dateKeys.map(date => ({ date, tokens: EMPTY_TOTALS(), amountCny: null, amountUsd: null }))
+  const unpriced = new Map<string, UnpricedModel>()
+
+  for (const entry of entries.values()) {
+    for (const [date, cell] of entry.days) {
+      const bucketIndex = indexByDate.get(date)
+      if (bucketIndex === undefined) continue
+      const bucket = buckets[bucketIndex]!
+      for (const tier of ['peak', 'offPeak'] as const) {
+        for (const [key, totals] of cell[tier]) {
+          addTotalsInto(bucket.tokens, totals)
+          const { provider, model } = splitModelKey(key)
+          const cnyPrice = prices.cny[model]
+          const usdPrice = prices.usd[model]
+          if (cnyPrice !== undefined) {
+            bucket.amountCny = (bucket.amountCny ?? 0) + amountOfTotals(totals, cnyPrice[tier])
+          }
+          if (usdPrice !== undefined) {
+            bucket.amountUsd = (bucket.amountUsd ?? 0) + amountOfTotals(totals, usdPrice[tier])
+          }
+          if (cnyPrice === undefined && usdPrice === undefined) {
+            unpriced.set(key, { provider, model })
+          }
+        }
+      }
+    }
+  }
+
+  const todayKey = localDayKey(toMs)
+  return {
+    buckets,
+    windows: {
+      today: sumFrom(buckets, todayKey, 1),
+      week: sumFrom(buckets, localDayKey(weekStartMs(now)), elapsedWeekDays(now)),
+      month: sumFrom(buckets, localDayKey(monthStartMs(now)), elapsedMonthDays(now)),
+    },
     unpricedModels: [...unpriced.values()],
   }
 }

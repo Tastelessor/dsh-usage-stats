@@ -65,6 +65,22 @@ export interface StatsTotals {
   cacheHitRate: number
 }
 
+/** The three summary windows selectable on the page. */
+export type WindowPeriod = 'today' | 'week' | 'month'
+
+/** One window's summary card payload (cards + derived metrics). */
+export interface WindowSummary {
+  tokens: TokenTotals
+  /** Estimated amount in CNY; null when no CNY-priced model produced usage in the window. */
+  amountCny: number | null
+  /** Estimated amount in USD; null when no USD-priced model produced usage in the window. */
+  amountUsd: number | null
+  /** Window-level cache hit rate; 0 when there is no prompt input. */
+  cacheHitRate: number
+  /** tokens.total / elapsed days inside the window. */
+  avgDailyTokens: number
+}
+
 /** A model seen in usage but absent from both currency price tables. */
 export interface UnpricedModel {
   provider: string

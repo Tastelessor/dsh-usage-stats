@@ -1,11 +1,13 @@
 /** Index folding: day×tier×model cells, serialization round-trip, atomic save. */
 import { describe, expect, it } from 'vitest'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   foldSamples, indexFromEvents, loadIndexFile, parseIndexFile, saveIndexFile,
-  serializeEntries, mapLimit, type EntriesById, type SessionIndexEntry,
+  serializeEntries, mapLimit, UsageIndexer, type EntriesById, type SessionIndexEntry,
+  type SessionSource,
 } from '../src/host/indexer.ts'
 import type { UsageSample } from '../src/host/aggregate.ts'
 import type { SessionId } from '@deepseek-ai/dsh-session'
@@ -122,5 +124,109 @@ describe('mapLimit', () => {
     })
     expect(out).toEqual([2, 4, 6, 8, 10])
     expect(peak).toBe(2)
+  })
+})
+
+const NOW = new Date('2026-08-19T10:00:00').getTime()
+const EVENT = {
+  type: 'assistant/message', seq: 0, time: Date.UTC(2026, 7, 18, 1, 0, 0),
+  data: {
+    usage: { inputTokens: 100, outputTokens: 0 },
+    message: { source: { kind: 'model', provider: 'deepseek-official', model: MODEL } },
+  },
+} as never
+
+/** 每个实例一个独立 tmp 目录，避免落盘文件跨用例串扰。 */
+function makeIndexer(
+  sources: SessionSource[],
+  loadEvents: (s: SessionSource) => unknown[],
+  opts: Partial<ConstructorParameters<typeof UsageIndexer>[0]> = {},
+): UsageIndexer {
+  return new UsageIndexer({
+    listSessions: async () => sources,
+    loadEvents: async (s) => loadEvents(s) as never,
+    indexPath: () => join(mkdtempSync(join(tmpdir(), 'dsh-tu-idx-')), 'index.json'),
+    now: () => NOW,
+    ...opts,
+  })
+}
+
+describe('UsageIndexer', () => {
+  it('reloads only sessions whose mtime changed', async () => {
+    const sources: SessionSource[] = [
+      { id: 'p1' as never, createdAt: 0, live: false, mtimeMs: 10 },
+      { id: 'p2' as never, createdAt: 0, live: false, mtimeMs: 20 },
+    ]
+    const readIds: string[] = []
+    const indexer = makeIndexer(sources, (s) => { readIds.push(String(s.id)); return [EVENT] })
+    await indexer.reconcile()
+    expect(readIds).toEqual(['p1', 'p2'])
+    // p1 未变；p2 的日志 mtime 20 → 30 → 只重读 p2
+    sources[1] = { id: 'p2' as never, createdAt: 0, live: false, mtimeMs: 30 }
+    await indexer.reconcile()
+    expect(readIds).toEqual(['p1', 'p2', 'p2'])
+  })
+
+  it('reads live sessions fresh on every reconcile', async () => {
+    let version = 1
+    const indexer = makeIndexer(
+      [{ id: 'live-1' as never, createdAt: 0, live: true }],
+      () => [{
+        type: 'assistant/message' as const, seq: 0, time: Date.UTC(2026, 7, 18, 1, 0, 0),
+        data: {
+          usage: { inputTokens: version * 100, outputTokens: 0 },
+          message: { source: { kind: 'model', provider: 'deepseek-official', model: MODEL } },
+        },
+      }],
+    )
+    await indexer.reconcile()
+    const first = [...indexer.entries.values()][0]!.days.get('2026-08-18')?.peak.get(KEY)?.input
+    version = 2
+    await indexer.reconcile()
+    const second = [...indexer.entries.values()][0]!.days.get('2026-08-18')?.peak.get(KEY)?.input
+    expect(first).toBe(100)
+    expect(second).toBe(200)
+  })
+
+  it('drops sessions that no longer exist after a later reconcile', async () => {
+    const sources: SessionSource[] = [{ id: 'gone' as never, createdAt: 0, live: false, mtimeMs: 1 }]
+    const indexer = makeIndexer(sources, () => [EVENT])
+    await indexer.reconcile()
+    expect(indexer.entries.has('gone' as never)).toBe(true)
+    sources.length = 0
+    await indexer.reconcile()
+    expect(indexer.entries.has('gone' as never)).toBe(false)
+  })
+
+  it('prunes days older than the horizon', async () => {
+    const indexer = makeIndexer(
+      [{ id: 'old' as never, createdAt: 0, live: false, mtimeMs: 1 }],
+      () => [{
+        type: 'assistant/message' as const, seq: 0, time: new Date('2026-06-01T12:00:00').getTime(),
+        data: { usage: { inputTokens: 1, outputTokens: 0 }, message: { source: { kind: 'model', provider: 'p', model: 'm' } } },
+      }],
+    )
+    await indexer.reconcile()
+    expect([...indexer.entries.values()][0]!.days.size).toBe(0) // 2026-06-01 早于 45 天水平线
+  })
+
+  it('restores entries from a persisted file and keeps them without reload', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-tu-idx-'))
+    const file = join(dir, 'index.json')
+    const entries: EntriesById = new Map()
+    const entry: SessionIndexEntry = { mtimeMs: 7, days: new Map() }
+    foldSamples(entry, [sample(PEAK, { inputTokens: 42 })])
+    entries.set('p-restored' as SessionId, entry)
+    await saveIndexFile(file, entries)
+
+    const readIds: string[] = []
+    const indexer = makeIndexer(
+      [{ id: 'p-restored' as never, createdAt: 0, live: false, mtimeMs: 7 }],
+      (s) => { readIds.push(String(s.id)); return [] },
+      { indexPath: () => file },
+    )
+    await indexer.reconcile()
+    expect(readIds).toEqual([]) // mtime 一致 → 直接用落盘内容
+    expect([...indexer.entries.values()][0]!.days.get('2026-08-18')?.peak.get(KEY)?.input).toBe(42)
   })
 })

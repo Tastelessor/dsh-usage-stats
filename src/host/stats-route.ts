@@ -13,27 +13,14 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { LlmModelInfo, LlmProviderInfo } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { Currency, ModelPriceRow, StatsResponse, TieredModelPrice } from '../shared/types.ts'
 import { aggregateUsage, windowStartMs } from './aggregate.ts'
 import { usageSamplesOf } from './samples.ts'
 import { mapLimit } from './indexer.ts'
+import type { SessionSource } from './indexer.ts'
 
 export { mapLimit }
-
-/** One candidate session resolved without loading its log. */
-export interface SessionSource {
-  id: SessionId
-  createdAt: number
-  /** Whether the session currently exists live (in-memory); live sources are never mtime-pruned. */
-  live: boolean
-  /**
-   * Persisted log file mtime, when the persistence backend can resolve an
-   * artifact path. A persisted source whose mtime predates the window start
-   * cannot contain in-window events and is skipped without a log read.
-   */
-  mtimeMs?: number
-}
+export type { SessionSource }
 
 /** Everything the route needs from the host; faked directly in tests. */
 export interface StatsDeps {

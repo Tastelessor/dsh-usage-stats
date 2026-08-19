@@ -13,7 +13,7 @@ import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type { Tier, TokenTotals } from '../shared/types.ts'
-import { localDayKey } from './aggregate.ts'
+import { localDayKey, rangeFromMs } from './aggregate.ts'
 import type { UsageSample } from './aggregate.ts'
 import { tierOf } from './prices.ts'
 import { usageSamplesOf } from './samples.ts'
@@ -155,4 +155,104 @@ export function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T)
     }
   })
   return Promise.all(workers).then(() => results)
+}
+
+/** One candidate session resolved without loading its log. */
+export interface SessionSource {
+  id: SessionId
+  createdAt: number
+  live: boolean
+  /** Persisted log mtime; a persisted source whose mtime matches the index entry is skipped. */
+  mtimeMs?: number
+}
+
+export interface IndexerDeps {
+  listSessions(): Promise<readonly SessionSource[]>
+  loadEvents(source: SessionSource): Promise<readonly SessionEvent[]>
+  /** Absolute path of the persisted snapshot file. */
+  indexPath(): string
+  /** Max concurrent log loads; default 8. */
+  concurrency?(): number
+  now?(): number
+  /** Debounce window for snapshot writes; default 5000ms. */
+  persistThrottleMs?(): number
+  /** Days of history kept per session; default 45. */
+  horizonDays?(): number
+}
+
+/**
+ * Incremental session index: reconciles the in-memory entries against
+ * listSessions() + log mtimes, reloading only changed/new/live sessions,
+ * pruning stale sessions and old days, and snapshotting to disk (throttled).
+ */
+export class UsageIndexer {
+  readonly entries: EntriesById = new Map()
+  private initialized: Promise<void> | null = null
+  private persistTimer: ReturnType<typeof setTimeout> | null = null
+
+  constructor(private readonly deps: IndexerDeps) {}
+
+  /** Load the persisted snapshot once (idempotent); failures yield an empty index. */
+  private async init(): Promise<void> {
+    this.initialized ??= loadIndexFile(this.deps.indexPath()).then(restored => {
+      for (const [id, entry] of restored) this.entries.set(id, entry)
+    }).catch(() => {})
+    await this.initialized
+  }
+
+  /** Bring entries in sync with the current session list and log mtimes. */
+  async reconcile(): Promise<void> {
+    await this.init()
+    const now = this.deps.now?.() ?? Date.now()
+    const horizonMs = rangeFromMs(now) - (this.deps.horizonDays?.() ?? 45) * 86_400_000
+    const sources = await this.deps.listSessions()
+    const seen = new Set<SessionId>()
+    await mapLimit(sources, this.deps.concurrency?.() ?? 8, async (source) => {
+      seen.add(source.id)
+      if (source.live) {
+        // Live heads are always fresh from the in-memory store.
+        try {
+          this.entries.set(source.id, indexFromEvents(await this.deps.loadEvents(source)))
+        } catch {
+          // keep the previous entry; one bad session must not fail the page
+        }
+        return
+      }
+      const entry = this.entries.get(source.id)
+      if (entry !== undefined && source.mtimeMs !== undefined && entry.mtimeMs === source.mtimeMs) return
+      try {
+        const next = indexFromEvents(await this.deps.loadEvents(source))
+        next.mtimeMs = source.mtimeMs
+        this.entries.set(source.id, next)
+      } catch {
+        // keep the previous entry
+      }
+    })
+    for (const id of this.entries.keys()) {
+      if (!seen.has(id)) this.entries.delete(id)
+    }
+    const floorKey = localDayKey(horizonMs)
+    for (const entry of this.entries.values()) {
+      for (const key of entry.days.keys()) {
+        if (key < floorKey) entry.days.delete(key)
+      }
+    }
+  }
+
+  /** Schedule a throttled atomic snapshot; safe to call after every request. */
+  persist(): void {
+    if (this.persistTimer !== null) return
+    this.persistTimer = setTimeout(async () => {
+      this.persistTimer = null
+      try {
+        await saveIndexFile(this.deps.indexPath(), this.entries)
+      } catch (error) {
+        console.error('[dsh-token-usage] index persist failed', error)
+      }
+    }, this.deps.persistThrottleMs?.() ?? 5_000)
+  }
+
+  dispose(): void {
+    if (this.persistTimer !== null) clearTimeout(this.persistTimer)
+  }
 }
