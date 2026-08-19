@@ -3,8 +3,9 @@
 English | [中文](README.zh.md)
 
 An external plugin for **DeepSeek Harness** (`dsh`): adds a **Token Usage** page to the
-Web settings panel, showing line charts of token usage and estimated spend over the past
-7 / 15 / 30 days, plus a per-model price table (per 1M tokens) with inline editing of
+Web settings panel, showing top summary cards (total tokens / daily average / cache hit
+rate / estimated spend, switchable between today / this week / this month) and a monthly
+token-usage heatmap, plus a per-model price table (per 1M tokens) with inline editing of
 prices per currency (CNY / USD) **and per period (peak / off-peak)**.
 
 Data comes from the `usage` field carried by `assistant/message` events in persisted
@@ -13,18 +14,20 @@ reports anything to an external service.
 
 ## Features
 
-- **Settings → Token Usage**: one-click range switch (7 / 15 / 30 days), token line charts (total / input / output / cache hit / cache write / reasoning), spend line charts (CNY and USD series), hover tooltips with exact values.
-- **Summary cards**: total tokens, daily average, average cache hit rate, estimated spend (CNY and USD side by side).
+- **Settings → Token Usage**: four summary cards (total tokens / daily average / avg cache hit rate / estimated spend CNY & USD), switchable instantly between **today / this week / this month** (pure client state); below, a monthly heatmap of daily token usage — hovering any day's cell shows that day's total tokens, input (cache miss), input (cache hit), output, cache hit rate and spend (CNY and USD).
+- **Summary cards**: total tokens, daily average, average cache hit rate, estimated spend (CNY and USD side by side), switchable between today / this week / this month.
 - **Model price table**: per-model prices in **CNY and USD**, each split into **peak / off-peak** tiers, for every connected model (from the `ctx.llm` model catalog); ships the official 2026-08-17+ tiered defaults for `deepseek-v4-flash` and `deepseek-v4-pro`.
 - **Price editing**: switch the table's currency *and* period (peak / off-peak), edit prices inline, hit "Save prices" to persist — stats refresh with the new prices instantly (no restart).
 - **Time-of-day billing**: every call's spend is resolved from its own event timestamp — calls during Beijing peak hours (09:00–12:00, 14:00–18:00) are billed at the peak tier, all others at the off-peak tier.
 - **Performance**:
-  - Server side prunes session logs by file mtime, reads with bounded concurrency (8 by default), and caches responses for 30s — measured 69 sessions dropping from 12.8s to ~1s (hot cache <1ms).
-  - The client prefetches all three windows in parallel at activation and keeps a 30s local cache — **range switches render instantly** (no loading flash, no extra requests).
+  - **Single endpoint + incremental index**: the server maintains a day × peak/off-peak × model **incremental persistent index**; hot requests against the ready in-memory index answer in tens of ms, and a session log whose mtime changed is re-read individually and merged incrementally.
+  - **Disk reconciliation**: the index is periodically written atomically (temp file + rename) to `$DSH_HOME/dsh-token-usage/index.json`, restored from disk on restart with near-zero rescan, and memory is bounded to a 45-day window. A 30s whole-page response cache covers the rest.
 
 ## Screenshots
 
-![Token usage page (charts + summary cards)](docs/screenshots/img-0.png)
+> The screenshots below still show the old (line-chart) page; v2 page (cards + heatmap) screenshots are pending update.
+
+![Token usage page (heatmap + summary cards)](docs/screenshots/img-0.png)
 
 ![Token usage page (price table)](docs/screenshots/img-1.png)
 
@@ -141,13 +144,13 @@ cache hit / miss / output):
 - A 30s response cache means an estimate around a peak-window boundary (09:00 / 12:00 / 14:00 / 18:00 Beijing time) can lag the tier switch by at most 30 seconds.
 - `reasoningTokens` is a subset of output tokens and is never counted twice.
 - Models with no price configured in either currency: tokens are still counted, spend is not, and the page shows "Not configured".
-- Aggregation runs in the node half in memory with only a 30s short-lived cache; with very large data volumes the first load may still take a few seconds (subsequent range switches render instantly from the client's prefetch cache).
+- The index is incremental and memory-bounded (45-day window), so hot requests run in tens of ms; building the index for the very first time on a huge data volume can still take a while, after which the incremental index plus the 30s response cache keep subsequent requests fast.
 
 ## Development
 
 ```sh
 pnpm install     # install deps (peers are provided by the dsh profile at runtime)
-pnpm test        # vitest, 72 tests
+pnpm test        # vitest, 78 tests
 pnpm typecheck   # tsc --noEmit
 pnpm build       # tsdown build into lib/
 ```
