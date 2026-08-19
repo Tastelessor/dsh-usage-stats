@@ -126,6 +126,22 @@ describe('createStatsHandler (v2)', () => {
     expect(JSON.parse(captured.body).buckets).toHaveLength(19)
   })
 
+  it('keeps serving a zero-filled page when the source-list query fails', async () => {
+    const indexer = new UsageIndexer({
+      listSessions: async () => { throw new Error('sessionQuery unavailable') },
+      loadEvents: async () => [],
+      indexPath: () => join(mkdtempSync(join(tmpdir(), 'dsh-tu-route-')), 'index.json'),
+      now: () => NOW,
+    })
+    const { handler, captured, req } = request({ indexer })
+    await handler(req, resOf(captured))
+    expect(captured.status).toBe(200)
+    const body = JSON.parse(captured.body)
+    expect(body.buckets).toHaveLength(19) // 08-01..08-19
+    expect(body.buckets[18].date).toBe('2026-08-19')
+    expect(body.windows.today.tokens.total).toBe(0)
+  })
+
   it('rejects non-GET with 405', async () => {
     const { handler, captured } = request()
     await handler({ method: 'POST', url: '/dsh-token-usage/stats' } as IncomingMessage, resOf(captured))

@@ -81,11 +81,21 @@ export function createStatsHandler(deps: StatsDeps): (req: IncomingMessage, res:
 
     const now = deps.now?.() ?? Date.now()
     const fromMs = rangeFromMs(now)
-    await deps.indexer.reconcile()
+    let entries = deps.indexer.entries
+    try {
+      await deps.indexer.reconcile()
+    } catch {
+      // A source-list failure (e.g. sessionQuery hiccup) must not fail the
+      // page: keep the old handler's contract and serve a zero-filled page.
+      // Reconcile's prune loop would wipe the in-memory index on an empty
+      // source list, so this guard lives here (route level), not inside the
+      // indexer — a broken source query simply yields no contributions.
+      entries = new Map()
+    }
 
     const pricesCny = deps.pricesCny()
     const pricesUsd = deps.pricesUsd()
-    const aggregation = aggregateEntries(deps.indexer.entries, { cny: pricesCny, usd: pricesUsd }, fromMs, now, now)
+    const aggregation = aggregateEntries(entries, { cny: pricesCny, usd: pricesUsd }, fromMs, now, now)
     const models = await modelRows(deps.listProviders(), deps.listModels, pricesCny, pricesUsd)
 
     const body: StatsResponse = {
