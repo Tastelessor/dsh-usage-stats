@@ -17,6 +17,9 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { Currency, ModelPriceRow, StatsResponse, TieredModelPrice } from '../shared/types.ts'
 import { aggregateUsage, windowStartMs } from './aggregate.ts'
 import { usageSamplesOf } from './samples.ts'
+import { mapLimit } from './indexer.ts'
+
+export { mapLimit }
 
 /** One candidate session resolved without loading its log. */
 export interface SessionSource {
@@ -66,22 +69,6 @@ export function parseDays(raw: string | null): number {
   if (raw === null) return 7
   const value = Number(raw)
   return DAY_CHOICES.has(value) ? value : 7
-}
-
-/** Run fn over items with at most `limit` in flight, preserving order. */
-export function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-  const results: R[] = new Array(items.length)
-  let cursor = 0
-  const workerCount = Math.max(1, Math.min(limit, items.length))
-  const workers = Array.from({ length: workerCount }, async () => {
-    for (;;) {
-      const index = cursor
-      cursor += 1
-      if (index >= items.length) return
-      results[index] = await fn(items[index] as T)
-    }
-  })
-  return Promise.all(workers).then(() => results)
 }
 
 /** Join the llm catalog with both currency price tables into display rows. */
