@@ -9,22 +9,29 @@
 export const css = `
 .token-usage { display: flex; flex-direction: column; gap: 16px; padding: 16px 0; }
 .stats-toolbar { display: flex; gap: 8px; align-items: center; }
-.range-btn, .series-btn, .currency-btn { padding: 4px 10px; border: 1px solid var(--dsw-color-border, #d0d7de); border-radius: 6px; background: var(--dsw-surface-bg, #ffffff); color: var(--dsw-color-text, #1f2328); cursor: pointer; }
-.range-btn.active, .series-btn.active, .currency-btn.active { background: var(--dsw-color-accent, #2563eb); color: var(--dsw-color-text-inverse, #ffffff); border-color: var(--dsw-color-accent, #2563eb); }
+.range-btn, .currency-btn { padding: 4px 10px; border: 1px solid var(--dsw-color-border, #d0d7de); border-radius: 6px; background: var(--dsw-surface-bg, #ffffff); color: var(--dsw-color-text, #1f2328); cursor: pointer; }
+.range-btn.active, .currency-btn.active { background: var(--dsw-color-accent, #2563eb); color: var(--dsw-color-text-inverse, #ffffff); border-color: var(--dsw-color-accent, #2563eb); }
 .stats-summary { display: flex; gap: 16px; flex-wrap: wrap; }
 .summary-card { flex: 1; min-width: 130px; border: 1px solid var(--dsw-color-border, #d0d7de); border-radius: 8px; padding: 12px; }
 .summary-label { font-size: 12px; color: var(--dsw-color-text-muted, #6e7781); }
 .summary-value { font-size: 20px; font-weight: 600; margin-top: 4px; }
-.series-switch { display: flex; gap: 6px; flex-wrap: wrap; }
-.line-chart { border: 1px solid var(--dsw-color-border, #d0d7de); border-radius: 8px; padding: 8px; }
-.line-chart-title { font-size: 13px; color: var(--dsw-color-text-muted, #6e7781); margin-bottom: 4px; }
-.chart-legend { display: flex; gap: 12px; font-size: 12px; color: var(--dsw-color-text-muted, #6e7781); margin-bottom: 2px; }
-.chart-legend-item { display: inline-flex; align-items: center; gap: 4px; }
-.chart-legend-dot, .chart-tooltip-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
-.chart-body { position: relative; }
-.chart-tooltip { position: absolute; transform: translate(-50%, -100%); pointer-events: none; background: var(--dsw-surface-overlay, #ffffff); border: 1px solid var(--dsw-color-border, #d0d7de); border-radius: 6px; padding: 6px 8px; font-size: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.12); white-space: nowrap; z-index: 5; }
-.chart-tooltip-date { font-weight: 600; margin-bottom: 2px; }
-.chart-tooltip-row { display: flex; align-items: center; gap: 4px; }
+.heatmap-wrap { border: 1px solid var(--dsw-color-border, #d0d7de); border-radius: 8px; padding: 12px; position: relative; }
+.heatmap-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.heatmap-title { font-size: 13px; font-weight: 600; }
+.heatmap-legend { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--dsw-color-text-muted, #6e7781); }
+.hm-swatch { width: 10px; height: 10px; border-radius: 2px; }
+.heatmap-grid { display: grid; grid-template-columns: 12px repeat(7, 1fr); gap: 3px; align-items: center; }
+.hm-weekday { font-size: 10px; color: var(--dsw-color-text-muted, #6e7781); text-align: center; }
+.hm-cell { aspect-ratio: 1; border-radius: 3px; background: var(--dsw-color-border-faint, #ebecf0); }
+.hm-l1 { background: rgba(37, 99, 235, 0.18); }
+.hm-l2 { background: rgba(37, 99, 235, 0.38); }
+.hm-l3 { background: rgba(37, 99, 235, 0.62); }
+.hm-l4 { background: rgba(37, 99, 235, 0.9); }
+.hm-today { outline: 1.5px solid var(--dsw-color-accent, #2563eb); outline-offset: 1px; }
+.hm-future, .hm-blank { background: transparent; }
+.hm-tooltip { position: absolute; left: 8px; top: 40px; pointer-events: none; background: var(--dsw-surface-overlay, #ffffff); border: 1px solid var(--dsw-color-border, #d0d7de); border-radius: 6px; padding: 8px 10px; font-size: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.12); white-space: nowrap; z-index: 20; display: flex; flex-direction: column; gap: 2px; }
+.hm-tooltip-title { font-weight: 600; margin-bottom: 2px; }
+.hm-tooltip-row { color: var(--dsw-color-text, #1f2328); }
 .price-table-wrap { border: 1px solid var(--dsw-color-border, #d0d7de); border-radius: 8px; padding: 12px; }
 .price-table-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .price-table-title { font-size: 13px; font-weight: 600; }

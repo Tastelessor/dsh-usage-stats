@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { TokenUsageSection } from '../src/client/TokenUsageSection.tsx'
+import { Heatmap } from '../src/client/Heatmap.tsx'
 import type { Currency, StatsResponse, TieredModelPrice, WindowSummary } from '../src/shared/types.ts'
 
 afterEach(cleanup)
@@ -48,6 +49,10 @@ const t = (key: string): any => ({
   priceNotConfigured: '未配置', priceSave: '保存单价', priceSaving: '保存中…', priceSaveFailed: '保存失败，请重试',
   priceEditHint: '编辑输入框后点击保存；币种与时段分别保存',
   unpricedHint: (n: number) => `${n} 个已使用模型未配置单价`,
+  periodToday: '当日', periodWeek: '本周', periodMonth: '本月',
+  heatmapTitle: '本月 Token 用量', heatmapLess: '少', heatmapMore: '多',
+  hmTotal: 'Token 总量', hmInputMiss: '输入（未命中缓存）', hmInputHit: '输入缓存（命中）',
+  hmOutput: '输出', hmHitRate: '缓存命中率', hmAmount: '金额',
 }[key] ?? key)
 
 const renderReady = (overrides: { onSavePrices?: (currency: Currency, prices: Record<string, TieredModelPrice>) => Promise<void> } = {}) => render(
@@ -129,5 +134,63 @@ describe('TokenUsageSection (interim)', () => {
     render(<TokenUsageSection controller={{} as never}
       useSnapshot={() => ({ status: 'error', error: 'boom', data: null })} t={t} onSavePrices={async () => {}} />)
     expect(screen.getByText(/加载失败: boom/)).toBeTruthy()
+  })
+})
+
+describe('Heatmap', () => {
+  const buckets = Array.from({ length: 19 }, (_, i) => ({
+    date: `2026-08-${String(1 + i).padStart(2, '0')}`,
+    tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, total: i === 18 ? 1_000_000 : 0 },
+    amountCny: i === 18 ? 5 : null,
+    amountUsd: i === 18 ? 1 : null,
+  }))
+  const to = new Date('2026-08-19T12:00:00').getTime()
+
+  it('renders one cell per day of the month plus weekday-aligned lead blanks', () => {
+    render(<Heatmap buckets={buckets} to={to} t={t} />)
+    expect(document.querySelectorAll('.hm-cell').length).toBe(31)  // 含未来日格
+    expect(document.querySelectorAll('.hm-blank').length).toBe(5)  // 8-01(周六) 前的 5 个空位
+    expect(document.querySelectorAll('.hm-future').length).toBe(12) // 8-20..8-31
+  })
+
+  it('colors the busiest day at the top quartile and leaves future days empty', () => {
+    render(<Heatmap buckets={buckets} to={to} t={t} />)
+    const today = document.querySelector('[data-date="2026-08-19"]') as HTMLElement
+    expect(today.classList.contains('hm-l4')).toBe(true) // 唯一有量日 = 当月最大
+    const future = document.querySelector('[data-date="2026-08-20"]') as HTMLElement
+    expect(future.classList.contains('hm-future')).toBe(true)
+    expect(future.classList.contains('hm-l4')).toBe(false)
+  })
+
+  it('shows a tooltip with the day breakdown on hover', () => {
+    render(<Heatmap buckets={buckets} to={to} t={t} />)
+    const cell = document.querySelector('[data-date="2026-08-19"]') as HTMLElement
+    fireEvent.mouseEnter(cell)
+    expect(screen.getByText('2026-08-19')).toBeTruthy()             // 浮窗标题
+    expect(screen.getByText(/Token 总量: 1\.0M/)).toBeTruthy()
+    expect(screen.getByText(/缓存命中率: 0\.0%/)).toBeTruthy()
+    expect(screen.getByText(/金额: ¥5\.00 \/ \$1\.00/)).toBeTruthy()
+  })
+})
+
+describe('TokenUsageSection (final)', () => {
+  it('switches the period buttons without refetching (pure client state)', () => {
+    let refreshed = 0
+    const controller = { refresh: () => { refreshed += 1; return Promise.resolve() } }
+    render(<TokenUsageSection controller={controller as never}
+      useSnapshot={() => ({ status: 'ready', error: null, data: {
+        ...RESPONSE,
+        windows: {
+          today: windowOf({ tokens: { input: 11, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, total: 11 }, avgDailyTokens: 2.2 }),
+          week: windowOf({ tokens: { input: 7000, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, total: 7000 }, avgDailyTokens: 7000 / 3 }),
+          month: windowOf({ tokens: { input: 300000, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, total: 300000 }, avgDailyTokens: 300000 / 19 }),
+        },
+      } })} t={t} onSavePrices={async () => {}} />)
+    expect(screen.getByText('11')).toBeTruthy()       // today total
+    fireEvent.click(screen.getByText('本周'))
+    expect(screen.getByText('7.0k')).toBeTruthy()     // week total
+    fireEvent.click(screen.getByText('本月'))
+    expect(screen.getByText('300.0k')).toBeTruthy()   // month total
+    expect(refreshed).toBe(0)
   })
 })

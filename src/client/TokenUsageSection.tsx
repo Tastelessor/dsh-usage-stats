@@ -1,8 +1,9 @@
-/** Settings → Token Usage page (interim): today cards + charts + price table. */
+/** Settings → Token Usage: period-switchable summary cards, monthly heatmap, price table. */
+import { useState } from 'react'
 import type { TokenUsageStore, TokenUsageState } from './store.ts'
-import { LineChart, type ChartSeries } from './LineChart.tsx'
+import { Heatmap } from './Heatmap.tsx'
 import { PriceTable } from './PriceTable.tsx'
-import type { Currency, TieredModelPrice } from '../shared/types.ts'
+import type { Currency, TieredModelPrice, WindowPeriod, WindowSummary } from '../shared/types.ts'
 
 export interface TokenUsageSectionProps {
   controller: TokenUsageStore
@@ -10,6 +11,8 @@ export interface TokenUsageSectionProps {
   t: (key: string) => any
   onSavePrices: (currency: Currency, prices: Record<string, TieredModelPrice>) => Promise<void>
 }
+
+const PERIODS: WindowPeriod[] = ['today', 'week', 'month']
 
 const formatTokens = (value: number): string => {
   if (value >= 1e6) return `${(value / 1e6).toFixed(1)}M`
@@ -19,49 +22,59 @@ const formatTokens = (value: number): string => {
 
 const formatPercent = (value: number): string => `${(value * 100).toFixed(1)}%`
 
-const SYMBOL: Record<Currency, string> = { CNY: '¥', USD: '$' }
-const SERIES_COLORS: Record<Currency, string> = { CNY: '#2563eb', USD: '#16a34a' }
+const formatMoney = (value: number | null, symbol: '¥' | '$'): string => value === null ? '—' : `${symbol}${value.toFixed(2)}`
 
-const formatMoney = (value: number | null, currency: Currency): string => value === null ? '—' : `${SYMBOL[currency]}${value.toFixed(2)}`
+function Cards({ summary, t }: { summary: WindowSummary; t: (key: string) => any }): JSX.Element {
+  return (
+    <div className="stats-summary">
+      <div className="summary-card">
+        <div className="summary-label">{t('summaryTokens')}</div>
+        <div className="summary-value">{formatTokens(summary.tokens.total)}</div>
+      </div>
+      <div className="summary-card">
+        <div className="summary-label">{t('summaryDailyAvg')}</div>
+        <div className="summary-value">{formatTokens(summary.avgDailyTokens)}</div>
+      </div>
+      <div className="summary-card">
+        <div className="summary-label">{t('summaryCacheHit')}</div>
+        <div className="summary-value">{formatPercent(summary.cacheHitRate)}</div>
+      </div>
+      <div className="summary-card">
+        <div className="summary-label">{t('summaryAmount')}</div>
+        <div className="summary-value">{formatMoney(summary.amountCny, '¥')} / {formatMoney(summary.amountUsd, '$')}</div>
+      </div>
+    </div>
+  )
+}
 
-/** The interim page body: today cards + charts from buckets + price table. */
+/** The full token-usage page body. */
 export function TokenUsageSection({ controller, useSnapshot, t, onSavePrices }: TokenUsageSectionProps): JSX.Element {
   const snapshot = useSnapshot()
+  const [period, setPeriod] = useState<WindowPeriod>('today')
 
   if (snapshot.status === 'loading' || snapshot.status === 'idle') return <div>{t('loading')}</div>
   if (snapshot.status === 'error') return <div className="stats-error">{t('error')}: {snapshot.error}</div>
 
   const data = snapshot.data!
-  const today = data.windows.today
   const hasUsage = data.buckets.some(b => b.tokens.total > 0)
-  const amountSeries: ChartSeries[] = [
-    { name: 'CNY', color: SERIES_COLORS.CNY, points: data.buckets.map(b => ({ label: b.date.slice(5), value: b.amountCny ?? 0 })) },
-    { name: 'USD', color: SERIES_COLORS.USD, points: data.buckets.map(b => ({ label: b.date.slice(5), value: b.amountUsd ?? 0 })) },
-  ]
 
   return (
     <div className="token-usage">
       <div className="stats-toolbar">
+        {PERIODS.map(p => (
+          <button key={p} className={period === p ? 'range-btn active' : 'range-btn'}
+            onClick={() => setPeriod(p)}>
+            {t(`period${p[0].toUpperCase()}${p.slice(1)}`)}
+          </button>
+        ))}
         <button className="range-btn" onClick={() => void controller.refresh()}>{t('refresh')}</button>
       </div>
 
-      <div className="stats-summary">
-        <div className="summary-card"><div className="summary-label">{t('summaryTokens')}</div><div className="summary-value">{formatTokens(today.tokens.total)}</div></div>
-        <div className="summary-card"><div className="summary-label">{t('summaryDailyAvg')}</div><div className="summary-value">{formatTokens(today.avgDailyTokens)}</div></div>
-        <div className="summary-card"><div className="summary-label">{t('summaryCacheHit')}</div><div className="summary-value">{formatPercent(today.cacheHitRate)}</div></div>
-        <div className="summary-card"><div className="summary-label">{t('summaryAmount')}</div><div className="summary-value">{formatMoney(today.amountCny, 'CNY')} / {formatMoney(today.amountUsd, 'USD')}</div></div>
-      </div>
+      <Cards summary={data.windows[period]} t={t} />
 
       {!hasUsage
         ? <div className="stats-empty">{t('empty')}</div>
-        : (
-          <>
-            <LineChart title={t('chartTokens')}
-              series={[{ name: t('seriesToken'), color: SERIES_COLORS.CNY, points: data.buckets.map(b => ({ label: b.date.slice(5), value: b.tokens.total })) }]}
-              format={formatTokens} />
-            <LineChart title={t('chartAmount')} series={amountSeries} format={v => v.toFixed(2)} />
-          </>
-        )}
+        : <Heatmap buckets={data.buckets} to={data.to} t={t} />}
 
       <PriceTable models={data.models} unpricedModels={data.unpricedModels} currency={data.currency} t={t}
         onSavePrices={onSavePrices} />
