@@ -1,6 +1,12 @@
 {
   "name": "dsh-token-usage",
   "version": "0.1.1",
+  "description": "Token-usage statistics page for the DeepSeek Harness settings UI (summary cards, monthly heatmap, incremental index)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Tastelessor/dsh-usage-stats.git"
+  },
   "type": "module",
   "main": "lib/index.js",
   "exports": {
