@@ -202,12 +202,13 @@ describe('UsageIndexer', () => {
     const indexer = makeIndexer(
       [{ id: 'old' as never, createdAt: 0, live: false, mtimeMs: 1 }],
       () => [{
-        type: 'assistant/message' as const, seq: 0, time: new Date('2026-06-01T12:00:00').getTime(),
+        type: 'assistant/message' as const, seq: 0, time: new Date('2026-03-01T12:00:00').getTime(),
         data: { usage: { inputTokens: 1, outputTokens: 0 }, message: { source: { kind: 'model', provider: 'p', model: 'm' } } },
       }],
     )
     await indexer.reconcile()
-    expect([...indexer.entries.values()][0]!.days.size).toBe(0) // 2026-06-01 早于 45 天水平线
+    // 3 个月窗口起点 06-01，水平线 = 06-01 − 45 天 = 04-17；03-01 早于水平线 → 剪掉
+    expect([...indexer.entries.values()][0]!.days.size).toBe(0)
   })
 
   it('restores entries from a persisted file and keeps them without reload', async () => {

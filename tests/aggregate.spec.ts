@@ -38,11 +38,13 @@ describe('window start helpers', () => {
     expect(localDayKey(weekStartMs(WED))).toBe('2026-08-17')
     expect(localDayKey(monthStartMs(WED))).toBe('2026-08-01')
   })
-  it('range start is the earlier of week Monday and month first day', () => {
-    expect(rangeFromMs(WED)).toBe(monthStartMs(WED))
+  it('range start covers the last 3 calendar months (min with week Monday)', () => {
+    expect(localDayKey(rangeFromMs(WED))).toBe('2026-06-01')      // 08-19 → 06-01
     const NEXT_WED = new Date('2026-09-02T10:30:00').getTime()
     expect(localDayKey(weekStartMs(NEXT_WED))).toBe('2026-08-31') // 跨月
-    expect(rangeFromMs(NEXT_WED)).toBe(weekStartMs(NEXT_WED))
+    expect(localDayKey(rangeFromMs(NEXT_WED))).toBe('2026-07-01') // 3 个月前 07-01 早于周一
+    const JAN = new Date('2026-01-15T10:00:00').getTime()
+    expect(localDayKey(rangeFromMs(JAN))).toBe('2025-11-01')      // 跨年
   })
   it('counts elapsed days inside the week and the month', () => {
     expect(elapsedWeekDays(WED)).toBe(3)   // 周一..周三
@@ -57,7 +59,7 @@ const entryOf = (samples: Parameters<typeof foldSamples>[1], mtimeMs?: number): 
 
 describe('aggregateEntries', () => {
   const NOW = new Date('2026-08-19T10:00:00').getTime()   // 周三
-  const FROM = rangeFromMs(NOW)                            // 本月1号 2026-08-01
+  const FROM = rangeFromMs(NOW)                            // 3 个月前首日 2026-06-01
 
   function aggregate(samples: UsageSample[], prices: { cny: typeof CNY; usd: typeof USD } = { cny: CNY, usd: USD }) {
     const entries = new Map<SessionId, SessionIndexEntry>()
@@ -67,9 +69,9 @@ describe('aggregateEntries', () => {
 
   it('zero-fills every day from range start to today', () => {
     const out = aggregate([])
-    expect(out.buckets[0].date).toBe('2026-08-01')
-    expect(out.buckets).toHaveLength(19) // 08-01..08-19
-    expect(out.buckets[18].date).toBe('2026-08-19')
+    expect(out.buckets[0].date).toBe('2026-06-01')
+    expect(out.buckets).toHaveLength(80) // 06-01..08-19
+    expect(out.buckets[79].date).toBe('2026-08-19')
     expect(out.buckets.every(b => b.tokens.total === 0)).toBe(true)
   })
 
@@ -101,8 +103,8 @@ describe('aggregateEntries', () => {
   it('handles a week crossing the month boundary', () => {
     const NOW2 = new Date('2026-09-02T10:00:00').getTime()   // 周三，周一=08-31 跨月
     const out = aggregateEntries(new Map(), { cny: CNY, usd: {} }, rangeFromMs(NOW2), NOW2, NOW2)
-    expect(out.buckets[0].date).toBe('2026-08-31')
-    expect(out.buckets).toHaveLength(3)
+    expect(out.buckets[0].date).toBe('2026-07-01')
+    expect(out.buckets).toHaveLength(64) // 07-01..09-02
     expect(out.windows.week.avgDailyTokens).toBe(0 / 3)   // elapsed=3
     expect(out.windows.month.avgDailyTokens).toBe(0 / 2)  // elapsed=2
   })
@@ -112,7 +114,7 @@ describe('aggregateEntries', () => {
       { time: Date.UTC(2026, 7, 19, 1, 0, 0), provider: 'openai', model: 'gpt-x', usage: { inputTokens: 1_000_000, outputTokens: 0 } },
     ])
     expect(out.unpricedModels).toEqual([{ provider: 'openai', model: 'gpt-x' }])
-    expect(out.buckets[18].amountCny).toBeNull()
+    expect(out.buckets[79].amountCny).toBeNull()
     expect(out.windows.today.amountCny).toBeNull()
   })
 
@@ -125,9 +127,23 @@ describe('aggregateEntries', () => {
     expect(out.windows.today.amountUsd).toBeNull()
   })
 
+  it('prices usage under a harness alias id once the resolved tables carry the alias', () => {
+    // resolvePriceTables injects `ark-code-latest` → canonical deepseek-v4-flash
+    const tables = {
+      cny: { ...CNY, 'ark-code-latest': CNY['deepseek-v4-flash'] },
+      usd: {},
+    }
+    const out = aggregate([
+      { time: Date.UTC(2026, 7, 19, 1, 0, 0), provider: 'deepseek-official', model: 'ark-code-latest', usage: { inputTokens: 1_000_000, outputTokens: 0 } },
+    ], tables)
+    expect(out.unpricedModels).toEqual([])          // 不再当作未配置模型
+    expect(out.buckets[79].amountCny).toBeCloseTo(1)
+    expect(out.windows.today.amountCny).toBeCloseTo(1)
+  })
+
   it('drops entries outside the requested range', () => {
     const out = aggregate([
-      { time: new Date('2026-07-01T12:00:00').getTime(), provider: 'deepseek-official', model: 'deepseek-v4-flash', usage: { inputTokens: 5_000_000, outputTokens: 0 } },
+      { time: new Date('2026-05-01T12:00:00').getTime(), provider: 'deepseek-official', model: 'deepseek-v4-flash', usage: { inputTokens: 5_000_000, outputTokens: 0 } },
     ])
     expect(out.buckets.every(b => b.tokens.total === 0)).toBe(true)
   })

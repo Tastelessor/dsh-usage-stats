@@ -73,9 +73,9 @@ describe('createStatsHandler (v2)', () => {
     expect(captured.status).toBe(200)
     const body = JSON.parse(captured.body)
     expect(body.currency).toBe('CNY')
-    expect(body.from).toBe(new Date('2026-08-01T00:00:00').getTime())
-    expect(body.buckets).toHaveLength(19) // 08-01..08-19
-    expect(body.buckets[18].date).toBe('2026-08-19')
+    expect(body.from).toBe(new Date('2026-06-01T00:00:00').getTime())
+    expect(body.buckets).toHaveLength(80) // 06-01..08-19
+    expect(body.buckets[79].date).toBe('2026-08-19')
     expect(body.windows.today.tokens.total).toBe(0)
     expect(body.windows.month.avgDailyTokens).toBe(0)
     expect(body.models).toEqual([{
@@ -98,7 +98,40 @@ describe('createStatsHandler (v2)', () => {
     expect(body.windows.today.tokens.total).toBe(1_500_000)
     expect(body.windows.today.amountCny).toBeCloseTo(2)
     expect(body.windows.today.amountUsd).toBeCloseTo(0.4)
-    expect(body.buckets[18].amountCny).toBeCloseTo(2)
+    expect(body.buckets[79].amountCny).toBeCloseTo(2)
+  })
+
+  it('joins catalog and usage under a harness alias id (ark-code-latest → deepseek-v4-flash)', async () => {
+    const indexer = new UsageIndexer({
+      listSessions: async () => [source('s1', 0, true)],
+      loadEvents: async () => [{
+        type: 'assistant/message', seq: 0, time: NOW,
+        data: {
+          usage: { inputTokens: 1_000_000, outputTokens: 0 },
+          message: { source: { kind: 'model', provider: 'deepseek-official', model: 'ark-code-latest' } },
+        },
+      }] as never,
+      indexPath: () => join(mkdtempSync(join(tmpdir(), 'dsh-tu-route-')), 'index.json'),
+      now: () => NOW,
+    })
+    const cny = { ...CNY, 'ark-code-latest': CNY['deepseek-v4-flash'] }
+    const usd = { ...USD, 'ark-code-latest': USD['deepseek-v4-flash'] }
+    const { handler, captured, req } = request({
+      indexer,
+      listModels: async () => [{ provider: 'deepseek-official', id: 'ark-code-latest', name: 'DeepSeek-V4-Flash' }],
+      pricesCny: () => cny,
+      pricesUsd: () => usd,
+    })
+    await handler(req, resOf(captured))
+    const body = JSON.parse(captured.body)
+    expect(body.models).toEqual([{
+      provider: 'deepseek-official', model: 'ark-code-latest', name: 'DeepSeek-V4-Flash',
+      cny: cny['ark-code-latest'], usd: usd['ark-code-latest'],
+    }])
+    expect(body.unpricedModels).toEqual([])                 // 别名落到价格 → 不再单独列出
+    expect(body.windows.today.amountCny).toBeCloseTo(1)     // 当日金额正常
+    expect(body.windows.today.amountUsd).toBeCloseTo(0.2)
+    expect(body.buckets[79].amountCny).toBeCloseTo(1)
   })
 
   it('serves a cached payload and skips the whole pipeline on a cache hit', async () => {
@@ -136,7 +169,7 @@ describe('createStatsHandler (v2)', () => {
     const { handler, captured, req } = request({ indexer })
     await handler(req, resOf(captured))
     expect(captured.status).toBe(200)
-    expect(JSON.parse(captured.body).buckets).toHaveLength(19)
+    expect(JSON.parse(captured.body).buckets).toHaveLength(80)
   })
 
   it('keeps serving a zero-filled page when the source-list query fails', async () => {
@@ -150,8 +183,8 @@ describe('createStatsHandler (v2)', () => {
     await handler(req, resOf(captured))
     expect(captured.status).toBe(200)
     const body = JSON.parse(captured.body)
-    expect(body.buckets).toHaveLength(19) // 08-01..08-19
-    expect(body.buckets[18].date).toBe('2026-08-19')
+    expect(body.buckets).toHaveLength(80) // 06-01..08-19
+    expect(body.buckets[79].date).toBe('2026-08-19')
     expect(body.windows.today.tokens.total).toBe(0)
   })
 

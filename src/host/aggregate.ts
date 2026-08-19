@@ -58,9 +58,16 @@ export function monthStartMs(now: number): number {
   return d.getTime()
 }
 
-/** Inclusive range start for the whole page: min(week Monday, month 1st). */
+/**
+ * Inclusive range start for the whole page: the first day of the current
+ * calendar month two months back (3 calendar months: current, previous,
+ * previous-previous), or this week's Monday when that falls earlier. JS
+ * Date rolls negative months across the year boundary automatically.
+ */
 export function rangeFromMs(now: number): number {
-  return Math.min(weekStartMs(now), monthStartMs(now))
+  const d = new Date(dayStartMs(now))
+  const threeMonthsBack = new Date(d.getFullYear(), d.getMonth() - 2, 1).getTime()
+  return Math.min(threeMonthsBack, weekStartMs(now))
 }
 
 /** Days elapsed inside the current ISO week (Mon..today), 1..7. */

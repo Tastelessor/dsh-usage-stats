@@ -42,6 +42,12 @@ describe('ConfigSchema', () => {
     const out = ConfigSchema({})
     expect(out.currency).toBe('CNY')
     expect(out.models).toEqual({})
+    expect(out.aliases).toEqual({})
+  })
+
+  it('round-trips an aliases override', () => {
+    const out = ConfigSchema({ aliases: { 'my-alias': 'deepseek-v4-pro' } })
+    expect(out.aliases).toEqual({ 'my-alias': 'deepseek-v4-pro' })
   })
 })
 
@@ -97,8 +103,29 @@ describe('resolvePriceTables', () => {
     expect(resolvePriceTable(config, 'CNY')['deepseek-v4-flash']).toEqual(DEFAULT_PRICES_CNY['deepseek-v4-flash'])
   })
 
-  it('falls back to defaults when config is empty', () => {
-    expect(resolvePriceTables(undefined)).toEqual({ cny: DEFAULT_PRICES_CNY, usd: DEFAULT_PRICES_USD })
+  it('falls back to defaults when config is empty, plus alias entries', () => {
+    expect(resolvePriceTables(undefined)).toEqual({
+      cny: { ...DEFAULT_PRICES_CNY, 'ark-code-latest': DEFAULT_PRICES_CNY['deepseek-v4-flash'] },
+      usd: { ...DEFAULT_PRICES_USD, 'ark-code-latest': DEFAULT_PRICES_USD['deepseek-v4-flash'] },
+    })
+  })
+
+  it('injects the default ARK alias into both currency tables at the canonical price', () => {
+    const tables = resolvePriceTables(undefined)
+    expect(tables.cny['ark-code-latest']).toEqual(DEFAULT_PRICES_CNY['deepseek-v4-flash'])
+    expect(tables.usd['ark-code-latest']).toEqual(DEFAULT_PRICES_USD['deepseek-v4-flash'])
+  })
+
+  it('an explicit config price for the alias wins over the aliased default', () => {
+    const tables = resolvePriceTables({ models: { 'ark-code-latest': { cny: TIERED } } })
+    expect(tables.cny['ark-code-latest']).toEqual(TIERED)
+    expect(tables.cny['deepseek-v4-flash']).toEqual(DEFAULT_PRICES_CNY['deepseek-v4-flash'])
+  })
+
+  it('maps custom aliases from config alongside the defaults', () => {
+    const tables = resolvePriceTables({ aliases: { 'my-alias': 'deepseek-v4-pro' } })
+    expect(tables.cny['my-alias']).toEqual(DEFAULT_PRICES_CNY['deepseek-v4-pro'])
+    expect(tables.cny['ark-code-latest']).toEqual(DEFAULT_PRICES_CNY['deepseek-v4-flash'])
   })
 
   it('defaults the currency to CNY and honors an override', () => {

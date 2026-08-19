@@ -138,40 +138,66 @@ describe('TokenUsageSection (interim)', () => {
   })
 })
 
-describe('Heatmap', () => {
-  const buckets = Array.from({ length: 19 }, (_, i) => ({
-    date: `2026-08-${String(1 + i).padStart(2, '0')}`,
-    tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, total: i === 18 ? 1_000_000 : i === 0 ? 600_000 : i === 1 ? 300_000 : i === 2 ? 100_000 : 0 },
-    amountCny: i === 18 ? 5 : null,
-    amountUsd: i === 18 ? 1 : null,
-  }))
+describe('Heatmap (3-month week strip)', () => {
+  const dayKeyOf = (ms: number): string => {
+    const d = new Date(ms)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
+  const mkBuckets = () => {
+    const start = new Date(2026, 5, 1).getTime() // 2026-06-01 00:00 local
+    return Array.from({ length: 80 }, (_, i) => ({
+      date: dayKeyOf(start + i * 86_400_000),
+      tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, total: 0 },
+      amountCny: null as number | null,
+      amountUsd: null as number | null,
+    }))
+  }
+  const withTotals = (buckets: ReturnType<typeof mkBuckets>, date: string, total: number, cny: number | null = null, usd: number | null = null) => {
+    const target = buckets.find(b => b.date === date)!
+    target.tokens.total = total
+    target.amountCny = cny
+    target.amountUsd = usd
+  }
   const to = new Date('2026-08-19T12:00:00').getTime()
 
-  it('renders one cell per day of the month plus weekday-aligned lead blanks', () => {
-    render(<Heatmap buckets={buckets} to={to} t={t} />)
-    expect(document.querySelectorAll('.hm-cell').length).toBe(31)  // 含未来日格
-    expect(document.querySelectorAll('.hm-blank').length).toBe(5)  // 8-01(周六) 前的 5 个空位
-    expect(document.querySelectorAll('.hm-future').length).toBe(12) // 8-20..8-31
+  it('renders one cell per day of the 3-month strip with month captions and weekday labels', () => {
+    render(<Heatmap buckets={mkBuckets()} to={to} t={t} />)
+    expect(document.querySelectorAll('.hm-cell').length).toBe(80) // 06-01..08-19
+    expect(screen.getByText('2026-06')).toBeTruthy()
+    expect(screen.getByText('2026-07')).toBeTruthy()
+    expect(screen.getByText('2026-08')).toBeTruthy()
+    for (const label of ['一', '二', '三', '四', '五', '六', '日']) {
+      expect(screen.getByText(label)).toBeTruthy()
+    }
+    expect(document.querySelectorAll('.hm-future').length).toBe(0) // 周带没有未来占位格
+    expect(document.querySelectorAll('.hm-blank').length).toBe(0)
   })
 
-  it('colors the busiest day at the top quartile and leaves future days empty', () => {
+  it('colors the busiest day at the top quartile and marks today', () => {
+    const buckets = mkBuckets()
+    withTotals(buckets, '2026-08-19', 1_000_000, 5, 1)
     render(<Heatmap buckets={buckets} to={to} t={t} />)
     const today = document.querySelector('[data-date="2026-08-19"]') as HTMLElement
-    expect(today.classList.contains('hm-l4')).toBe(true) // 唯一有量日 = 当月最大
-    const future = document.querySelector('[data-date="2026-08-20"]') as HTMLElement
-    expect(future.classList.contains('hm-future')).toBe(true)
-    expect(future.classList.contains('hm-l4')).toBe(false)
+    expect(today.classList.contains('hm-l4')).toBe(true)
+    expect(today.classList.contains('hm-today')).toBe(true)
   })
 
-  it('places relative-quartile bins into their respective color levels', () => {
+  it('places relative-quartile bins into their respective color levels across all 3 months', () => {
+    const buckets = mkBuckets()
+    withTotals(buckets, '2026-08-19', 1_000_000)
+    withTotals(buckets, '2026-08-01', 600_000)
+    withTotals(buckets, '2026-08-02', 300_000)
+    withTotals(buckets, '2026-06-15', 100_000)
     render(<Heatmap buckets={buckets} to={to} t={t} />)
-    // max = 1_000_000 (08-19); ratios: 0.6 → l3, 0.3 → l2, 0.1 → l1
+    // max = 1_000_000；0.6 → l3，0.3 → l2，0.1 → l1
     expect((document.querySelector('[data-date="2026-08-01"]') as HTMLElement).classList.contains('hm-l3')).toBe(true)
     expect((document.querySelector('[data-date="2026-08-02"]') as HTMLElement).classList.contains('hm-l2')).toBe(true)
-    expect((document.querySelector('[data-date="2026-08-03"]') as HTMLElement).classList.contains('hm-l1')).toBe(true)
+    expect((document.querySelector('[data-date="2026-06-15"]') as HTMLElement).classList.contains('hm-l1')).toBe(true)
   })
 
   it('shows a tooltip with the day breakdown on hover', () => {
+    const buckets = mkBuckets()
+    withTotals(buckets, '2026-08-19', 1_000_000, 5, 1)
     render(<Heatmap buckets={buckets} to={to} t={t} />)
     const cell = document.querySelector('[data-date="2026-08-19"]') as HTMLElement
     fireEvent.mouseEnter(cell)

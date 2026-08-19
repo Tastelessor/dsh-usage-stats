@@ -1,6 +1,7 @@
 /**
  * Plugin configuration: a per-model price table keyed by model id, split by
- * currency (CNY default, USD optional), plus the preferred display currency.
+ * currency (CNY default, USD optional), plus the preferred display currency
+ * and an alias map from harness-specific model ids to canonical catalog ids.
  * Defaults cover the official DeepSeek route's catalog (deepseek-v4-flash,
  * deepseek-v4-pro) with the 2026-08-17+ official peak/off-peak prices.
  *
@@ -12,6 +13,14 @@
  * hours"). Fill the current official public prices here (verify against the
  * provider's pricing page; README carries the "official prices win"
  * disclaimer).
+ *
+ * Aliases: the ARK coding endpoints advertise their model under ids like
+ * `ark-code-latest` whose physical model changes over time (today it resolves
+ * to DeepSeek V4 Flash). Both the llm catalog and every usage event carry the
+ * alias id, so without a mapping the built-in `deepseek-v4-flash` price never
+ * matches — the row shows empty prices and the day's amount stays null.
+ * resolvePriceTables injects the alias keys into both currency tables, and
+ * users can override or extend the map through the `aliases` config.
  */
 
 import z from '@deepseek-ai/schemastery'
@@ -64,12 +73,24 @@ export const DEFAULT_PRICES_USD: Record<string, TieredModelPrice> = {
   },
 }
 
+/**
+ * Default alias map from harness-specific model ids to canonical catalog ids.
+ * ARK's coding endpoints advertise `ark-code-latest` (the physical model
+ * behind it can change; today it is DeepSeek V4 Flash). Users override or
+ * extend via the `aliases` config.
+ */
+export const DEFAULT_MODEL_ALIASES: Record<string, string> = {
+  'ark-code-latest': 'deepseek-v4-flash',
+}
+
 /** Raw plugin config; every field optional in yml. */
 export interface Config {
   /** Preferred display currency for prices and amounts; defaults to CNY. */
   currency?: Currency
   /** Per-model prices by currency; omitted entries fall back to the defaults. */
   models?: Record<string, ModelPricesByCurrency>
+  /** Resource-id aliases → canonical catalog id; defaults cover the ARK coding endpoints. */
+  aliases?: Record<string, string>
 }
 
 const priceSchema = z.object({
@@ -102,6 +123,7 @@ const currencyPricesSchema = z.object({
 export const ConfigSchema: z<Config> = z.object({
   currency: z.union([z.const('CNY'), z.const('USD')]).default(DEFAULT_CURRENCY),
   models: z.dict(currencyPricesSchema).default({}),
+  aliases: z.dict(z.string()).default({}),
 })
 
 /** True for the tiered {peak, offPeak} shape; a bare ModelPrice is legacy flat. */
@@ -119,7 +141,11 @@ export function normalizeTiered(price: ModelPrice | TieredModelPrice): TieredMod
   return isTieredPrice(price) ? price : { peak: price, offPeak: price }
 }
 
-/** Resolved per-currency price tables: configured entries win, defaults fill the rest. */
+/**
+ * Resolved per-currency price tables: configured entries win, defaults fill
+ * the rest, and every alias id is injected pointing at its canonical price
+ * (an alias with its own explicit config entry keeps that price).
+ */
 export function resolvePriceTables(config: Config | undefined): {
   cny: Record<string, TieredModelPrice>
   usd: Record<string, TieredModelPrice>
@@ -129,6 +155,11 @@ export function resolvePriceTables(config: Config | undefined): {
   for (const [id, entry] of Object.entries(config?.models ?? {})) {
     if (entry.cny !== undefined) cny[id] = normalizeTiered(entry.cny)
     if (entry.usd !== undefined) usd[id] = normalizeTiered(entry.usd)
+  }
+  const aliases = { ...DEFAULT_MODEL_ALIASES, ...(config?.aliases ?? {}) }
+  for (const [alias, canonical] of Object.entries(aliases)) {
+    if (cny[alias] === undefined && cny[canonical] !== undefined) cny[alias] = cny[canonical]
+    if (usd[alias] === undefined && usd[canonical] !== undefined) usd[alias] = usd[canonical]
   }
   return { cny, usd }
 }

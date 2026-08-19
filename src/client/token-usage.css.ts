@@ -20,15 +20,15 @@ export const css = `
 .heatmap-title { font-size: 13px; font-weight: 600; }
 .heatmap-legend { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--dsw-color-text-muted, #6e7781); }
 .hm-swatch { width: 10px; height: 10px; border-radius: 2px; }
-.heatmap-grid { display: grid; grid-template-columns: 12px repeat(7, 1fr); gap: 3px; align-items: center; }
-.hm-weekday { font-size: 10px; color: var(--dsw-color-text-muted, #6e7781); text-align: center; }
+.heatmap-grid { display: grid; gap: 3px; }
+.hm-month-label { font-size: 11px; font-weight: 600; color: var(--dsw-color-text-muted, #6e7781); align-self: end; padding: 0 2px 1px; }
+.hm-weekday { font-size: 10px; color: var(--dsw-color-text-muted, #6e7781); text-align: center; align-self: center; }
 .hm-cell { aspect-ratio: 1; border-radius: 3px; background: var(--dsw-color-border-faint, #ebecf0); }
 .hm-l1 { background: rgba(37, 99, 235, 0.18); }
 .hm-l2 { background: rgba(37, 99, 235, 0.38); }
 .hm-l3 { background: rgba(37, 99, 235, 0.62); }
 .hm-l4 { background: rgba(37, 99, 235, 0.9); }
 .hm-today { outline: 1.5px solid var(--dsw-color-accent, #2563eb); outline-offset: 1px; }
-.hm-future, .hm-blank { background: transparent; }
 .hm-tooltip { position: absolute; left: 8px; top: 40px; pointer-events: none; background: var(--dsw-surface-overlay, #ffffff); border: 1px solid var(--dsw-color-border, #d0d7de); border-radius: 6px; padding: 8px 10px; font-size: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.12); white-space: nowrap; z-index: 20; display: flex; flex-direction: column; gap: 2px; }
 .hm-tooltip-title { font-weight: 600; margin-bottom: 2px; }
 .hm-tooltip-row { color: var(--dsw-color-text, #1f2328); }

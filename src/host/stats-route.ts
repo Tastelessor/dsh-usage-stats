@@ -1,9 +1,9 @@
 /**
  * HTTP handler for GET /dsh-token-usage/stats. Composes the page payload from
  * the incremental UsageIndexer (mtime-reconciled, in-memory day buckets):
- * zero-filled day buckets over [min(month 1st, week Monday) .. now], the
- * today/week/month window summaries, and the llm catalog joined with both
- * currencies' prices.
+ * zero-filled day buckets over [min(3-months-ago 1st, week Monday) .. now],
+ * the today/week/month window summaries, and the llm catalog joined with
+ * both currencies' prices.
  *
  * Session reads happen inside the indexer; per-session failures are contained
  * there (a broken log never fails the page). A whole-page response cache

@@ -1,18 +1,24 @@
 /**
- * Monthly token-usage heatmap, GitHub-contribution style: one cell per day of
- * the current month, columns aligned to ISO weekdays (Mon first), color depth
- * by relative quartile of the month's busiest day, and a hover tooltip with
- * the day's full breakdown. Cells after today render as future placeholders.
+ * Token-usage heatmap, GitHub-contribution style, over the last 3 calendar
+ * months: one column per week (Mon-first), one row per weekday with labels on
+ * the left, month captions spanning their weeks above the strip. Color depth
+ * is the relative quartile of the window's busiest day, and each cell has a
+ * hover tooltip with the day's full breakdown. Cell size is uniform across
+ * all three months by construction: every column is an equal 1fr track, so a
+ * wider month range yields consistently sized cells instead of a few giant
+ * month-only squares.
  */
 import { useState } from 'react'
 import type { DayBucket } from '../shared/types.ts'
 
 export interface HeatmapProps {
   buckets: readonly DayBucket[]
-  /** Reference instant (the response's `to`); the month grid derives from it. */
+  /** Reference instant (the response's `to`); the 3-month grid derives from it. */
   to: number
   t: (key: string) => any
 }
+
+const DAY_MS = 86_400_000
 
 const formatTokens = (value: number): string => {
   if (value >= 1e6) return `${(value / 1e6).toFixed(1)}M`
@@ -21,6 +27,19 @@ const formatTokens = (value: number): string => {
 }
 
 const pad = (n: number): string => String(n).padStart(2, '0')
+
+/** Local calendar date key, 'YYYY-MM-DD' (mirrors the host aggregation). */
+const dayKey = (ms: number): string => {
+  const d = new Date(ms)
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+/** Local midnight of an instant. */
+const dayStart = (ms: number): number => {
+  const d = new Date(ms)
+  d.setHours(0, 0, 0, 0)
+  return d.getTime()
+}
 
 /** 1..4 relative quartile level, or 0 for no usage. */
 function levelOf(total: number, max: number): number {
@@ -38,36 +57,49 @@ export function Heatmap({ buckets, to, t }: HeatmapProps): JSX.Element {
   const [hovered, setHovered] = useState<DayBucket | null>(null)
 
   const now = new Date(to)
-  const year = now.getFullYear()
-  const month = now.getMonth()
-  const daysInMonth = new Date(year, month + 1, 0).getDate()
-  const firstWeekday = (new Date(year, month, 1).getDay() + 6) % 7 // Mon=0
+  // The 3 calendar months ending with the reference month (JS Date rolls
+  // negative months across the year boundary automatically).
+  const start = new Date(now.getFullYear(), now.getMonth() - 2, 1)
+  const firstMs = dayStart(start.getTime())
+  const lastMs = dayStart(now.getTime())
+  const totalDays = Math.round((lastMs - firstMs) / DAY_MS) + 1
+  const firstWeekday = (start.getDay() + 6) % 7 // Mon=0
+  const weeks = Math.ceil((firstWeekday + totalDays) / 7)
 
-  const byDate = new Map(buckets.filter(b => {
-    const [y, m] = b.date.split('-').map(Number)
-    return y === year && m === month + 1
-  }).map(b => [b.date, b]))
-  const todayKey = `${year}-${pad(month + 1)}-${pad(now.getDate())}`
+  const byDate = new Map(buckets.map(b => [b.date, b]))
+  const todayKey = dayKey(now.getTime())
   const max = Math.max(0, ...[...byDate.values()].map(b => b.tokens.total))
 
-  const cells: JSX.Element[] = []
-  for (let i = 0; i < firstWeekday; i++) cells.push(<div key={`blank-${i}`} className="hm-blank" />)
-  for (let day = 1; day <= daysInMonth; day++) {
-    const key = `${year}-${pad(month + 1)}-${pad(day)}`
-    if (key > todayKey) {
-      cells.push(<div key={key} className="hm-cell hm-future" data-date={key} />)
-      continue
+  const months = [0, 1, 2].map(offset => {
+    const monthStart = new Date(now.getFullYear(), now.getMonth() - 2 + offset, 1)
+    const y = monthStart.getFullYear()
+    const m = monthStart.getMonth()
+    const daysInMonth = new Date(y, m + 1, 0).getDate()
+    const firstDayIndex = Math.round((monthStart.getTime() - firstMs) / DAY_MS)
+    const lastDayIndex = Math.min(firstDayIndex + daysInMonth - 1, totalDays - 1)
+    return {
+      label: `${y}-${pad(m + 1)}`,
+      colStart: Math.floor((firstWeekday + firstDayIndex) / 7),
+      colEnd: Math.floor((firstWeekday + lastDayIndex) / 7),
     }
+  })
+
+  const cells: JSX.Element[] = []
+  for (let d = 0; d < totalDays; d++) {
+    const ms = firstMs + d * DAY_MS
+    const key = dayKey(ms)
     const bucket = byDate.get(key)
     const total = bucket?.tokens.total ?? 0
     const level = levelOf(total, max)
+    const weekday = (firstWeekday + d) % 7
+    const col = Math.floor((firstWeekday + d) / 7)
     const cellProps = bucket === undefined ? {} : {
       onMouseEnter: (event: React.MouseEvent<HTMLDivElement>) => setHovered(bucket),
       onMouseLeave: () => setHovered(null),
     }
     cells.push(
       <div key={key} className={`hm-cell hm-l${level}${key === todayKey ? ' hm-today' : ''}`}
-        data-date={key} {...cellProps} />,
+        data-date={key} style={{ gridRow: weekday + 2, gridColumn: col + 2 }} {...cellProps} />,
     )
   }
 
@@ -88,8 +120,16 @@ export function Heatmap({ buckets, to, t }: HeatmapProps): JSX.Element {
           <span>{t('heatmapMore')}</span>
         </span>
       </div>
-      <div className="heatmap-grid">
-        {WEEK_LABELS.map(label => <div key={label} className="hm-weekday">{label}</div>)}
+      <div className="heatmap-grid" style={{ gridTemplateColumns: `14px repeat(${weeks}, 1fr)` }}>
+        {months.map((m, i) => (
+          <div key={m.label} className="hm-month-label"
+            style={{ gridRow: 1, gridColumn: `${m.colStart + 2} / ${m.colEnd + 3}` }}>
+            {m.label}
+          </div>
+        ))}
+        {WEEK_LABELS.map((label, i) => (
+          <div key={label} className="hm-weekday" style={{ gridRow: i + 2, gridColumn: 1 }}>{label}</div>
+        ))}
         {cells}
       </div>
       {hovered !== null && (

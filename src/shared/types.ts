@@ -94,7 +94,7 @@ export interface ModelPricesByCurrency {
 
 /** The whole page payload served by GET /dsh-token-usage/stats. */
 export interface StatsResponse {
-  /** Inclusive range start: min(current-month 1st, this-week Monday), epoch ms. */
+  /** Inclusive range start: min(3-calendar-months-ago 1st, this-week Monday), epoch ms. */
   from: number
   /** Inclusive range end (now), epoch ms. */
   to: number
