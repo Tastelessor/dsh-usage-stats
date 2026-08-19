@@ -52,6 +52,42 @@ export function windowStartMs(now: number, days: number): number {
   return cursor.getTime()
 }
 
+/** Local midnight of an instant. */
+export function dayStartMs(ms: number): number {
+  const d = new Date(ms)
+  d.setHours(0, 0, 0, 0)
+  return d.getTime()
+}
+
+/** Local midnight of the current ISO week's Monday (Mon=0). */
+export function weekStartMs(now: number): number {
+  const d = new Date(dayStartMs(now))
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
+  return d.getTime()
+}
+
+/** Local midnight of the first day of the current month. */
+export function monthStartMs(now: number): number {
+  const d = new Date(dayStartMs(now))
+  d.setDate(1)
+  return d.getTime()
+}
+
+/** Inclusive range start for the whole page: min(week Monday, month 1st). */
+export function rangeFromMs(now: number): number {
+  return Math.min(weekStartMs(now), monthStartMs(now))
+}
+
+/** Days elapsed inside the current ISO week (Mon..today), 1..7. */
+export function elapsedWeekDays(now: number): number {
+  return ((new Date(now).getDay() + 6) % 7) + 1
+}
+
+/** Days elapsed inside the current month (1st..today), 1..31. */
+export function elapsedMonthDays(now: number): number {
+  return new Date(now).getDate()
+}
+
 /**
  * Aggregate samples into one zero-filled bucket per day.
  * @param samples - in-window model calls.

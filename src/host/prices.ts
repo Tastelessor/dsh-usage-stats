@@ -12,6 +12,7 @@
 
 import type { TokenUsage } from '@deepseek-ai/dsh-llm'
 import type { ModelPrice, Tier, TieredModelPrice } from '../shared/types.ts'
+import type { TokenTotals } from '../shared/types.ts'
 
 /** Beijing (UTC+8) hour of an instant; the official peak windows are Beijing-time. */
 export function beijingHour(ms: number): number {
@@ -45,4 +46,19 @@ export function amountBreakdown(usage: TokenUsage, price: TieredModelPrice, time
 /** Total estimated amount for one call, resolved to the time's tier. */
 export function amountOf(usage: TokenUsage, price: TieredModelPrice, timeMs: number): number {
   return amountBreakdown(usage, price, timeMs).total
+}
+
+/**
+ * Total estimated amount from aggregated per-tier token totals. The caller
+ * picks the tier's ModelPrice; amounts scale linearly, so summing tokens
+ * first and multiplying once is equivalent to per-event billing.
+ */
+export function amountOfTotals(
+  tokens: Pick<TokenTotals, 'input' | 'output' | 'cacheRead' | 'cacheWrite'>,
+  price: ModelPrice,
+): number {
+  return (tokens.input / 1e6) * price.inputPerM
+    + (tokens.cacheRead / 1e6) * price.cacheReadPerM
+    + (tokens.cacheWrite / 1e6) * price.cacheWritePerM
+    + (tokens.output / 1e6) * price.outputPerM
 }

@@ -1,6 +1,7 @@
 /** Per-day aggregation: bucketing, zero-fill, dual-currency amounts, tier-aware billing. */
 import { describe, expect, it } from 'vitest'
 import { aggregateUsage, localDayKey, windowStartMs, type UsageSample } from '../src/host/aggregate.ts'
+import { dayStartMs, weekStartMs, monthStartMs, rangeFromMs, elapsedWeekDays, elapsedMonthDays } from '../src/host/aggregate.ts'
 import { tierOf } from '../src/host/prices.ts'
 import type { TieredModelPrice } from '../src/shared/types.ts'
 
@@ -137,5 +138,30 @@ describe('aggregateUsage', () => {
     const start = windowStartMs(at('2026-08-14'), 7)
     expect(localDayKey(start)).toBe('2026-08-08')
     expect(new Date(start).getHours()).toBe(0)
+  })
+})
+
+describe('window start helpers', () => {
+  const WED = new Date('2026-08-19T10:30:00').getTime()
+  it('normalizes to local midnight', () => {
+    const start = dayStartMs(WED)
+    expect(new Date(start).getHours()).toBe(0)
+    expect(localDayKey(start)).toBe('2026-08-19')
+  })
+  it('finds the current week Monday (ISO) and the month first day', () => {
+    expect(localDayKey(weekStartMs(WED))).toBe('2026-08-17')
+    expect(localDayKey(monthStartMs(WED))).toBe('2026-08-01')
+  })
+  it('range start is the earlier of week Monday and month first day', () => {
+    expect(rangeFromMs(WED)).toBe(monthStartMs(WED))
+    const NEXT_WED = new Date('2026-09-02T10:30:00').getTime()
+    expect(localDayKey(weekStartMs(NEXT_WED))).toBe('2026-08-31') // 跨月
+    expect(rangeFromMs(NEXT_WED)).toBe(weekStartMs(NEXT_WED))
+  })
+  it('counts elapsed days inside the week and the month', () => {
+    expect(elapsedWeekDays(WED)).toBe(3)   // 周一..周三
+    expect(elapsedMonthDays(WED)).toBe(19)
+    expect(elapsedWeekDays(new Date('2026-08-17T08:00:00').getTime())).toBe(1)
+    expect(elapsedMonthDays(new Date('2026-08-01T08:00:00').getTime())).toBe(1)
   })
 })

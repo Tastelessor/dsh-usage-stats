@@ -108,7 +108,7 @@ describe('resolvePriceTables', () => {
 })
 
 /** Tier selection: Beijing-hour windows, amount formula, reasoning never double-counted. */
-import { amountBreakdown, amountOf, beijingHour, tierOf } from '../src/host/prices.ts'
+import { amountBreakdown, amountOf, amountOfTotals, beijingHour, tierOf } from '../src/host/prices.ts'
 
 /** Epoch ms of a UTC instant with the given Beijing hour (hour 0..23). */
 const atBeijingHour = (day: number, hour: number): number =>
@@ -174,5 +174,17 @@ describe('amountBreakdown', () => {
     for (const ms of [PEAK, OFF]) {
       expect(amountOf({ inputTokens: 1_000_000, outputTokens: 0 }, flat, ms)).toBeCloseTo(0.33)
     }
+  })
+})
+
+describe('amountOfTotals', () => {
+  const PRICE: ModelPrice = { inputPerM: 1, cacheReadPerM: 0.1, outputPerM: 2, cacheWritePerM: 0.5 }
+  it('computes an amount from aggregated totals, no per-event tier logic', () => {
+    const tokens = { input: 1_000_000, output: 500_000, cacheRead: 2_000_000, cacheWrite: 1_000_000, reasoning: 0, total: 4_500_000 }
+    expect(amountOfTotals(tokens, PRICE)).toBeCloseTo(1 + 1 + 0.2 + 0.5) // input 1M*1 + cacheRead 2M*0.1 + cacheWrite 1M*0.5 + output 500k*2
+  })
+  it('ignores reasoning tokens (a subset of output)', () => {
+    const tokens = { input: 0, output: 1_000_000, cacheRead: 0, cacheWrite: 0, reasoning: 900_000, total: 1_000_000 }
+    expect(amountOfTotals(tokens, PRICE)).toBeCloseTo(2)
   })
 })
