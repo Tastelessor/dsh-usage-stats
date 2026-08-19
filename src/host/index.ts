@@ -10,6 +10,8 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { stat } from 'node:fs/promises'
 import { installSettingsSection, type SettingsPathOp, type SettingsProvider } from '@deepseek-ai/dsh-settings'
 // Type-only: loads the cordis Context augmentation for ctx.sessionQuery and
@@ -21,7 +23,8 @@ import type { SessionStore } from '@deepseek-ai/dsh-session'
 // Loads the '@deepseek-ai/cordis' Context augmentation that types ctx.webServer.
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { ConfigSchema, NS, resolveCurrency, resolvePriceTables, type Config } from './config.ts'
-import { createStatsHandler, type SessionSource } from './stats-route.ts'
+import { UsageIndexer, type SessionSource } from './indexer.ts'
+import { createStatsHandler } from './stats-route.ts'
 import { createPricesHandler, mergePrices } from './prices-route.ts'
 import type { Currency, TieredModelPrice } from '../shared/types.ts'
 
@@ -44,12 +47,12 @@ export function apply(ctx: Context, config: Config): void {
   const sessionQuery = ctx.sessionQuery
   const priceTables = (): ReturnType<typeof resolvePriceTables> => resolvePriceTables(current())
 
-  // Short-lived response cache: repeat views and range switches are instant,
-  // and any settings write for this namespace drops it immediately.
+  // Short-lived response cache: repeat views are instant, and any settings
+  // write for this namespace drops it immediately.
   const CACHE_TTL_MS = 30_000
-  const cache = new Map<number, { at: number; payload: string }>()
+  let cacheLatest: { at: number; payload: string } | undefined
   ctx.on('settings/updated', (ns) => {
-    if (ns === NS) cache.clear()
+    if (ns === NS) cacheLatest = undefined
   })
 
   // Price write-back: the browser posts the edited currency's overlay here
@@ -66,58 +69,59 @@ export function apply(ctx: Context, config: Config): void {
     // Our own write invalidates the aggregation cache immediately; the
     // settings/updated listener would also do it, but being explicit here
     // keeps the next fetch correct even if the event fan-out is delayed.
-    cache.clear()
+    cacheLatest = undefined
   }
 
-  const statsHandler = createStatsHandler({
-    listSessions: async () => {
-      const records = await sessionQuery.listSessions()
-      const persistence = ctx.get('sessionPersistence')
-      const sources: SessionSource[] = []
-      for (const record of records) {
-        let mtimeMs: number | undefined
-        // Prune persisted logs by file mtime: an untouched log predates the
-        // window and cannot hold in-window events. Live sessions are exempt
-        // (their in-memory head is fresher than the last persisted write).
-        if (!record.live && persistence !== undefined) {
-          try {
-            const location = persistence.locate(record.header)
-            if (location !== undefined) {
-              const identity = await stat(location.path)
-              mtimeMs = identity.mtimeMs
-            }
-          } catch {
-            // Pruning unavailable for this session; fall back to reading it.
+  const dshHomePath = ctx.get('dshHomePath') as ((...segments: string[]) => string) | undefined
+  const indexFile = (): string => dshHomePath !== undefined
+    ? join(dshHomePath('dsh-token-usage'), 'index.json')
+    : join(homedir(), '.dsh', 'dsh-token-usage', 'index.json')
+
+  const listSessions = async (): Promise<readonly SessionSource[]> => {
+    const records = await sessionQuery.listSessions()
+    const persistence = ctx.get('sessionPersistence')
+    const sources: SessionSource[] = []
+    for (const record of records) {
+      let mtimeMs: number | undefined
+      if (!record.live && persistence !== undefined) {
+        try {
+          const location = persistence.locate(record.header)
+          if (location !== undefined) {
+            const identity = await stat(location.path)
+            mtimeMs = identity.mtimeMs
           }
+        } catch {
+          // pruning unavailable for this session; fall back to reading it
         }
-        sources.push({ id: record.header.id, createdAt: record.header.createdAt, live: record.live, mtimeMs })
       }
-      return sources
-    },
-    loadEvents: async (source) => {
-      // Live head beats the persisted tail: frozen in-memory events need no I/O.
-      const live = (ctx.sessions as unknown as SessionStore).get(source.id)
-      if (live !== undefined) return live.events
-      const persistence = ctx.get('sessionPersistence')
-      if (persistence !== undefined) return (await persistence.inspect(source.id)).events
-      // Last-resort fallback when no persistence backend is mounted.
-      return (await sessionQuery.readSession(source.id)).events
-    },
+      sources.push({ id: record.header.id, createdAt: record.header.createdAt, live: record.live, mtimeMs })
+    }
+    return sources
+  }
+  const loadEvents = async (source: SessionSource) => {
+    const live = (ctx.sessions as unknown as SessionStore).get(source.id)
+    if (live !== undefined) return live.events
+    const persistence = ctx.get('sessionPersistence')
+    if (persistence !== undefined) return (await persistence.inspect(source.id)).events
+    return (await sessionQuery.readSession(source.id)).events
+  }
+  const indexer = new UsageIndexer({ listSessions, loadEvents, indexPath: indexFile })
+  // Clear the indexer's persist timer when the plugin fiber unloads.
+  ctx.effect(() => () => indexer.dispose(), 'dsh-token-usage: indexer dispose')
+
+  const statsHandler = createStatsHandler({
+    indexer,
     listProviders: () => llm.listProviders(),
     listModels: (provider) => llm.listModels(provider),
     pricesCny: () => priceTables().cny,
     pricesUsd: () => priceTables().usd,
     currency: () => resolveCurrency(current()),
     cache: {
-      get: (days) => {
-        const entry = cache.get(days)
-        if (entry === undefined || Date.now() - entry.at >= CACHE_TTL_MS) {
-          if (entry !== undefined) cache.delete(days)
-          return undefined
-        }
-        return entry.payload
+      get: () => {
+        if (cacheLatest === undefined || Date.now() - cacheLatest.at >= CACHE_TTL_MS) return undefined
+        return cacheLatest.payload
       },
-      set: (days, payload) => { cache.set(days, { at: Date.now(), payload }) },
+      set: (payload) => { cacheLatest = { at: Date.now(), payload } },
     },
   })
   const pricesHandler = createPricesHandler({ writePrices })

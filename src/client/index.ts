@@ -41,9 +41,6 @@ const NS = 'settings.tokenUsage'
  * the contract is narrowed once at registration. */
 type TokenUsageDicts = Record<LocaleId, Record<TokenUsageKey, string>>
 
-/** Every window the page offers; the store warms them all at activation. */
-const RANGES = [7, 15, 30] as const
-
 export const inject = ['slots', 'locale']
 
 export function apply(ctx: ClientContext): void {
@@ -76,9 +73,6 @@ export function apply(ctx: ClientContext): void {
     if (!response.ok || body?.ok !== true) throw new Error('price save rejected')
     controller.clearCache()
     await controller.refresh()
-    for (const days of RANGES) {
-      if (days !== controller.store.getSnapshot().days) void controller.prefetch(days)
-    }
   }
 
   const injected = (): TokenUsageSectionProps => ({
@@ -88,17 +82,10 @@ export function apply(ctx: ClientContext): void {
     onSavePrices: savePrices,
   })
 
-  // The section body only exposes range/refresh controls after the first
-  // response (an idle snapshot renders the loading text), so fetch the
-  // default range once at activation and warm the other windows in the
-  // background — range switches then render from cache instead of waiting
-  // on a cold aggregation.
+  // Fetch the single page payload once at activation; repeat views and an
+  // explicit refresh re-fetch inside the store's 30s cache / refresh path.
   ctx.effect(() => {
-    const initial = controller.store.getSnapshot().days
-    void controller.load(initial)
-    for (const days of RANGES) {
-      if (days !== initial) void controller.prefetch(days)
-    }
+    void controller.load()
     return () => {}
   }, 'dsh-token-usage: initial stats load')
 

@@ -52,19 +52,6 @@ export interface DayBucket {
   amountUsd: number | null
 }
 
-/** Whole-range totals plus derived summary metrics. */
-export interface StatsTotals {
-  tokens: TokenTotals
-  /** Estimated amount in CNY; null when no CNY-priced model produced usage in the range. */
-  amountCny: number | null
-  /** Estimated amount in USD; null when no USD-priced model produced usage in the range. */
-  amountUsd: number | null
-  /** tokens.total / days — the average daily token volume. */
-  avgDailyTokens: number
-  /** cacheRead / (input + cacheRead + cacheWrite) over the range; 0 when there is no prompt input. */
-  cacheHitRate: number
-}
-
 /** The three summary windows selectable on the page. */
 export type WindowPeriod = 'today' | 'week' | 'month'
 
@@ -105,18 +92,19 @@ export interface ModelPricesByCurrency {
   usd?: ModelPrice | TieredModelPrice
 }
 
-/** The whole page payload served by GET /dsh-token-usage/stats?days=N. */
+/** The whole page payload served by GET /dsh-token-usage/stats. */
 export interface StatsResponse {
-  days: number
-  /** Inclusive window start, epoch ms. */
+  /** Inclusive range start: min(current-month 1st, this-week Monday), epoch ms. */
   from: number
-  /** Inclusive window end, epoch ms. */
+  /** Inclusive range end (now), epoch ms. */
   to: number
   generatedAt: number
   /** Preferred display currency (seeds the price-table toggle). */
   currency: Currency
+  /** Day buckets from `from` to `to`, zero-filled. */
   buckets: DayBucket[]
-  totals: StatsTotals
+  /** Summary cards for the three selectable periods. */
+  windows: Record<WindowPeriod, WindowSummary>
   /** Price table rows for every catalog model. */
   models: ModelPriceRow[]
   /** Models that produced usage but have no price configured in either currency. */

@@ -1,12 +1,7 @@
 /**
- * Token-usage page store: fetches the host aggregation JSON over the
+ * Token-usage page store: fetches the single stats payload over the
  * plugin-owned route and publishes a uSES-safe snapshot. The fetcher is
  * injectable for tests; the default hits the same-origin endpoint.
- *
- * Range switches ride a short-lived per-window cache: the page prefetches
- * every window at activation, so switching 7/15/30 days is instant instead of
- * another cold aggregation, and an explicit refresh (or a price save) busts
- * the cache so edited prices show up immediately.
  */
 
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
@@ -17,18 +12,17 @@ export type TokenUsageStatus = 'idle' | 'loading' | 'ready' | 'error'
 export interface TokenUsageState {
   status: TokenUsageStatus
   error: string | null
-  days: number
   data: StatsResponse | null
 }
 
-/** Default fetcher: same-origin GET, throws on non-2xx. */
-export async function defaultFetcher(days: number): Promise<StatsResponse> {
-  const response = await fetch(`/dsh-token-usage/stats?days=${days}`, { credentials: 'same-origin' })
+/** Default fetcher: same-origin GET of the single stats endpoint. */
+export async function defaultFetcher(): Promise<StatsResponse> {
+  const response = await fetch('/dsh-token-usage/stats', { credentials: 'same-origin' })
   if (!response.ok) throw new Error(`token usage fetch failed: HTTP ${response.status}`)
   return response.json() as Promise<StatsResponse>
 }
 
-/** How long a cached window stays fresh before the next load re-fetches it. */
+/** How long a cached payload stays fresh before the next load re-fetches it. */
 const CACHE_TTL_MS = 30_000
 
 /** The page controller (one per settings surface). */
@@ -36,36 +30,29 @@ export class TokenUsageStore {
   readonly store: SnapshotStore<TokenUsageState> = createSnapshotStore<TokenUsageState>({
     status: 'idle',
     error: null,
-    days: 7,
     data: null,
   })
 
   /** Latest load wins; an older response never overwrites a newer one. */
   private generation = 0
+  private inflight: Promise<StatsResponse> | null = null
+  private cachedEntry: { at: number; data: StatsResponse } | null = null
 
-  /** One in-flight fetch per window: concurrent loads share it, never duplicate. */
-  private readonly inflight = new Map<number, Promise<StatsResponse>>()
+  constructor(private readonly fetcher: () => Promise<StatsResponse> = defaultFetcher) {}
 
-  /** Fresh per-window responses; served instantly on range switches. */
-  private readonly cache = new Map<number, { at: number; data: StatsResponse }>()
-
-  constructor(private readonly fetcher: (days: number) => Promise<StatsResponse> = defaultFetcher) {}
-
-  /** Load the given range; a fresh cache entry serves it without a network round. */
-  async load(days: number, options: { force?: boolean } = {}): Promise<void> {
+  /** Load the page payload; a fresh cache entry serves it without a network round. */
+  async load(): Promise<void> {
     const generation = ++this.generation
-    if (options.force !== true) {
-      const cached = this.cached(days)
-      if (cached !== undefined) {
-        this.store.update((s) => { s.status = 'ready'; s.error = null; s.days = days; s.data = cached })
-        return
-      }
+    const cached = this.cached()
+    if (cached !== undefined) {
+      this.store.update((s) => { s.status = 'ready'; s.error = null; s.data = cached })
+      return
     }
-    this.store.update((s) => { s.status = 'loading'; s.error = null; s.days = days })
+    this.store.update((s) => { s.status = 'loading'; s.error = null })
     try {
-      const data = await this.fetch(days)
+      const data = await this.fetch()
       if (generation !== this.generation) return
-      this.cache.set(days, { at: Date.now(), data })
+      this.cachedEntry = { at: Date.now(), data }
       this.store.update((s) => { s.status = 'ready'; s.error = null; s.data = data })
     } catch (error) {
       if (generation !== this.generation) return
@@ -76,41 +63,29 @@ export class TokenUsageStore {
     }
   }
 
-  /** Re-fetch the currently selected range, bypassing the cache. */
+  /** Re-fetch, bypassing the cache. */
   refresh(): Promise<void> {
-    return this.load(this.store.getSnapshot().days, { force: true })
+    this.cachedEntry = null
+    return this.load()
   }
 
-  /** Warm one window into the cache without touching the visible snapshot; failures are silent. */
-  async prefetch(days: number): Promise<void> {
-    if (this.cached(days) !== undefined) return
-    try {
-      const data = await this.fetch(days)
-      this.cache.set(days, { at: Date.now(), data })
-    } catch {
-      // Background warming must never fail the page; a later explicit load retries.
-    }
-  }
-
-  /** Drop every cached window (after a price save, so edits are never served stale). */
+  /** Drop the cached payload (after a price save, so edits are never served stale). */
   clearCache(): void {
-    this.cache.clear()
+    this.cachedEntry = null
   }
 
-  /** Fetch one window once: concurrent callers share the same in-flight promise. */
-  private async fetch(days: number): Promise<StatsResponse> {
-    const existing = this.inflight.get(days)
-    if (existing !== undefined) return existing
-    const request = this.fetcher(days).finally(() => { this.inflight.delete(days) })
-    this.inflight.set(days, request)
+  private async fetch(): Promise<StatsResponse> {
+    if (this.inflight !== null) return this.inflight
+    const request = this.fetcher().finally(() => { this.inflight = null })
+    this.inflight = request
     return request
   }
 
-  private cached(days: number): StatsResponse | undefined {
-    const entry = this.cache.get(days)
-    if (entry === undefined) return undefined
+  private cached(): StatsResponse | undefined {
+    const entry = this.cachedEntry
+    if (entry === null) return undefined
     if (Date.now() - entry.at >= CACHE_TTL_MS) {
-      this.cache.delete(days)
+      this.cachedEntry = null
       return undefined
     }
     return entry.data
