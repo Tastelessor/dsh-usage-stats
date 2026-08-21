@@ -75,11 +75,26 @@ export function apply(ctx: ClientContext): void {
     await controller.refresh()
   }
 
+  // "Restore defaults": the host drops the currency's configured-price overlay
+  // so every catalog model falls back to the built-in official prices.
+  const restorePrices = async (currency: Currency): Promise<void> => {
+    const response = await fetch('/dsh-token-usage/prices', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ currency, action: 'reset' }),
+    })
+    const body = await response.json().catch(() => null) as { ok?: boolean } | null
+    if (!response.ok || body?.ok !== true) throw new Error('price reset rejected')
+    controller.clearCache()
+    await controller.refresh()
+  }
+
   const injected = (): TokenUsageSectionProps => ({
     controller,
     useSnapshot,
     t,
     onSavePrices: savePrices,
+    onRestoreDefaults: restorePrices,
   })
 
   // Fetch the single page payload once at activation; repeat views and an

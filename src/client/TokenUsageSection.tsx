@@ -1,5 +1,5 @@
 /** Settings → Token Usage: period-switchable summary cards, monthly heatmap, price table. */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { TokenUsageStore, TokenUsageState } from './store.ts'
 import { Heatmap } from './Heatmap.tsx'
 import { PriceTable } from './PriceTable.tsx'
@@ -10,6 +10,7 @@ export interface TokenUsageSectionProps {
   useSnapshot: () => TokenUsageState
   t: (key: string) => any
   onSavePrices: (currency: Currency, prices: Record<string, TieredModelPrice>) => Promise<void>
+  onRestoreDefaults: (currency: Currency) => Promise<void>
 }
 
 const PERIODS: WindowPeriod[] = ['today', 'week', 'month']
@@ -48,9 +49,16 @@ function Cards({ summary, t }: { summary: WindowSummary; t: (key: string) => any
 }
 
 /** The full token-usage page body. */
-export function TokenUsageSection({ controller, useSnapshot, t, onSavePrices }: TokenUsageSectionProps): JSX.Element {
+export function TokenUsageSection({ controller, useSnapshot, t, onSavePrices, onRestoreDefaults }: TokenUsageSectionProps): JSX.Element {
   const snapshot = useSnapshot()
   const [period, setPeriod] = useState<WindowPeriod>('today')
+
+  // Auto-refresh on entry: every time the section is shown it re-loads the
+  // page payload (the store's 30s cache keeps back-to-back visits cheap), so
+  // the statistics stay current without needing a manual refresh click.
+  useEffect(() => {
+    void controller.load()
+  }, [controller])
 
   if (snapshot.status === 'loading' || snapshot.status === 'idle') return <div>{t('loading')}</div>
   if (snapshot.status === 'error') return <div className="stats-error">{t('error')}: {snapshot.error}</div>
@@ -77,7 +85,7 @@ export function TokenUsageSection({ controller, useSnapshot, t, onSavePrices }: 
         : <Heatmap buckets={data.buckets} to={data.to} t={t} />}
 
       <PriceTable models={data.models} unpricedModels={data.unpricedModels} currency={data.currency} t={t}
-        onSavePrices={onSavePrices} />
+        onSavePrices={onSavePrices} onRestoreDefaults={onRestoreDefaults} />
     </div>
   )
 }

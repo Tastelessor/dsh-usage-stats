@@ -47,6 +47,7 @@ const t = (key: string): any => ({
   priceInput: '输入未命中缓存', priceOutput: '输出', priceTierPeak: '高峰时段', priceTierOffPeak: '空闲时段',
   peakHint: '高峰时段为北京时间 9:00–12:00、14:00–18:00',
   priceNotConfigured: '未配置', priceSave: '保存单价', priceSaving: '保存中…', priceSaveFailed: '保存失败，请重试',
+  priceRestoreDefault: '恢复默认', priceRestoring: '恢复中…', priceRestoreFailed: '恢复失败，请重试',
   priceEditHint: '编辑输入框后点击保存；币种与时段分别保存',
   unpricedHint: (n: number) => `${n} 个已使用模型未配置单价`,
   periodToday: '当日', periodWeek: '本周', periodMonth: '本月',
@@ -55,10 +56,23 @@ const t = (key: string): any => ({
   hmOutput: '输出', hmHitRate: '缓存命中率', hmAmount: '金额',
 }[key] ?? key)
 
-const renderReady = (overrides: { onSavePrices?: (currency: Currency, prices: Record<string, TieredModelPrice>) => Promise<void> } = {}) => render(
-  <TokenUsageSection controller={{} as never}
+/** Minimal controller mock: the section's mount effect calls load(), the toolbar calls refresh(). */
+const makeController = (overrides: Record<string, unknown> = {}) => ({
+  load: () => Promise.resolve(),
+  refresh: () => Promise.resolve(),
+  clearCache: () => {},
+  ...overrides,
+})
+
+const renderReady = (overrides: {
+  onSavePrices?: (currency: Currency, prices: Record<string, TieredModelPrice>) => Promise<void>
+  onRestoreDefaults?: (currency: Currency) => Promise<void>
+  controller?: Record<string, unknown>
+} = {}) => render(
+  <TokenUsageSection controller={(overrides.controller ?? makeController()) as never}
     useSnapshot={() => ({ status: 'ready', error: null, data: RESPONSE })} t={t}
-    onSavePrices={overrides.onSavePrices ?? (async () => {})} />,
+    onSavePrices={overrides.onSavePrices ?? (async () => {})}
+    onRestoreDefaults={overrides.onRestoreDefaults ?? (async () => {})} />,
 )
 
 describe('TokenUsageSection (interim)', () => {
@@ -118,22 +132,33 @@ describe('TokenUsageSection (interim)', () => {
 
   it('triggers a refresh from the toolbar', () => {
     let refreshed = false
-    const controller = { refresh: () => { refreshed = true; return Promise.resolve() } }
+    const controller = makeController({ refresh: () => { refreshed = true; return Promise.resolve() } })
     render(<TokenUsageSection controller={controller as never}
-      useSnapshot={() => ({ status: 'ready', error: null, data: RESPONSE })} t={t} onSavePrices={async () => {}} />)
+      useSnapshot={() => ({ status: 'ready', error: null, data: RESPONSE })} t={t}
+      onSavePrices={async () => {}} onRestoreDefaults={async () => {}} />)
     fireEvent.click(screen.getByText('刷新'))
     expect(refreshed).toBe(true)
   })
 
+  it('restores defaults for the edited currency from the price actions', async () => {
+    const restored: Currency[] = []
+    renderReady({ onRestoreDefaults: async (currency) => { restored.push(currency) } })
+    fireEvent.click(screen.getByText('$ USD'))
+    fireEvent.click(screen.getByText('恢复默认'))
+    expect(restored).toEqual(['USD'])
+  })
+
   it('shows the empty state when there is no usage', () => {
-    render(<TokenUsageSection controller={{} as never}
-      useSnapshot={() => ({ status: 'ready', error: null, data: { ...RESPONSE, buckets: [] } })} t={t} onSavePrices={async () => {}} />)
+    render(<TokenUsageSection controller={(makeController()) as never}
+      useSnapshot={() => ({ status: 'ready', error: null, data: { ...RESPONSE, buckets: [] } })} t={t}
+      onSavePrices={async () => {}} onRestoreDefaults={async () => {}} />)
     expect(screen.getByText('该时间段无用量数据')).toBeTruthy()
   })
 
   it('shows the error state with message', () => {
-    render(<TokenUsageSection controller={{} as never}
-      useSnapshot={() => ({ status: 'error', error: 'boom', data: null })} t={t} onSavePrices={async () => {}} />)
+    render(<TokenUsageSection controller={(makeController()) as never}
+      useSnapshot={() => ({ status: 'error', error: 'boom', data: null })} t={t}
+      onSavePrices={async () => {}} onRestoreDefaults={async () => {}} />)
     expect(screen.getByText(/加载失败: boom/)).toBeTruthy()
   })
 })
@@ -209,9 +234,17 @@ describe('Heatmap (3-month week strip)', () => {
 })
 
 describe('TokenUsageSection (final)', () => {
+  it('auto-reloads once on mount so entering the section refreshes the statistics', () => {
+    const loads: number[] = []
+    render(<TokenUsageSection controller={{ ...makeController(), load: () => { loads.push(1); return Promise.resolve() } } as never}
+      useSnapshot={() => ({ status: 'ready', error: null, data: RESPONSE })} t={t}
+      onSavePrices={async () => {}} onRestoreDefaults={async () => {}} />)
+    expect(loads).toEqual([1])
+  })
+
   it('switches the period buttons without refetching (pure client state)', () => {
     let refreshed = 0
-    const controller = { refresh: () => { refreshed += 1; return Promise.resolve() } }
+    const controller = makeController({ refresh: () => { refreshed += 1; return Promise.resolve() } })
     render(<TokenUsageSection controller={controller as never}
       useSnapshot={() => ({ status: 'ready', error: null, data: {
         ...RESPONSE,
@@ -220,7 +253,7 @@ describe('TokenUsageSection (final)', () => {
           week: windowOf({ tokens: { input: 7000, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, total: 7000 }, avgDailyTokens: 7000 / 3 }),
           month: windowOf({ tokens: { input: 300000, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, total: 300000 }, avgDailyTokens: 300000 / 19 }),
         },
-      } })} t={t} onSavePrices={async () => {}} />)
+      } })} t={t} onSavePrices={async () => {}} onRestoreDefaults={async () => {}} />)
     expect(screen.getByText('11')).toBeTruthy()       // today total
     fireEvent.click(screen.getByText('本周'))
     expect(screen.getByText('7.0k')).toBeTruthy()     // week total

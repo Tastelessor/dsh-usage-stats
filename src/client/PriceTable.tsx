@@ -10,6 +10,8 @@ export interface PriceTableProps {
   t: (key: string) => any
   /** Persist the edited prices for one currency (both tiers); resolves after the settings write. */
   onSavePrices: (currency: Currency, prices: Record<string, TieredModelPrice>) => Promise<void>
+  /** Restore the current currency's prices to the built-in official defaults. */
+  onRestoreDefaults: (currency: Currency) => Promise<void>
 }
 
 const SYMBOL: Record<Currency, string> = { CNY: '¥', USD: '$' }
@@ -46,11 +48,12 @@ function PriceInput({ value, onChange, saving }: {
 }
 
 /** Render one row per catalog model with a per-currency × per-period editor. */
-export function PriceTable({ models, unpricedModels, currency, t, onSavePrices }: PriceTableProps): JSX.Element {
+export function PriceTable({ models, unpricedModels, currency, t, onSavePrices, onRestoreDefaults }: PriceTableProps): JSX.Element {
   const [editCurrency, setEditCurrency] = useState<Currency>(currency)
   const [editTier, setEditTier] = useState<Tier>('offPeak')
   const [drafts, setDrafts] = useState<Record<Currency, Record<string, TieredModelPrice>>>({ CNY: {}, USD: {} })
   const [saving, setSaving] = useState(false)
+  const [restoring, setRestoring] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const tieredOf = (row: ModelPriceRow): TieredModelPrice | null => editCurrency === 'CNY' ? row.cny : row.usd
@@ -81,6 +84,19 @@ export function PriceTable({ models, unpricedModels, currency, t, onSavePrices }
       setError(String(t('priceSaveFailed')))
     } finally {
       setSaving(false)
+    }
+  }
+
+  const restore = async (): Promise<void> => {
+    setRestoring(true)
+    setError(null)
+    try {
+      await onRestoreDefaults(editCurrency)
+      setDrafts(d => ({ ...d, [editCurrency]: {} }))
+    } catch {
+      setError(String(t('priceRestoreFailed')))
+    } finally {
+      setRestoring(false)
     }
   }
 
@@ -124,9 +140,9 @@ export function PriceTable({ models, unpricedModels, currency, t, onSavePrices }
                 return (
                   <tr key={`${row.provider}/${row.model}`} className={hasDraft ? 'price-row-editing' : undefined}>
                     <td>{row.name}</td>
-                    <td><PriceInput key={`${editCurrency}/${editTier}/cacheRead`} value={tieredOf(row) !== null ? tier.cacheReadPerM : null} saving={saving} onChange={v => setDraft(row, { cacheReadPerM: v })} /></td>
-                    <td><PriceInput key={`${editCurrency}/${editTier}/input`} value={tieredOf(row) !== null ? tier.inputPerM : null} saving={saving} onChange={v => setDraft(row, { inputPerM: v })} /></td>
-                    <td><PriceInput key={`${editCurrency}/${editTier}/output`} value={tieredOf(row) !== null ? tier.outputPerM : null} saving={saving} onChange={v => setDraft(row, { outputPerM: v })} /></td>
+                    <td><PriceInput key={`${editCurrency}/${editTier}/cacheRead`} value={tieredOf(row) !== null ? tier.cacheReadPerM : null} saving={saving || restoring} onChange={v => setDraft(row, { cacheReadPerM: v })} /></td>
+                    <td><PriceInput key={`${editCurrency}/${editTier}/input`} value={tieredOf(row) !== null ? tier.inputPerM : null} saving={saving || restoring} onChange={v => setDraft(row, { inputPerM: v })} /></td>
+                    <td><PriceInput key={`${editCurrency}/${editTier}/output`} value={tieredOf(row) !== null ? tier.outputPerM : null} saving={saving || restoring} onChange={v => setDraft(row, { outputPerM: v })} /></td>
                   </tr>
                 )
               })}
@@ -142,8 +158,11 @@ export function PriceTable({ models, unpricedModels, currency, t, onSavePrices }
           </table>
         )}
       <div className="price-actions">
-        <button className="price-save" disabled={saving} onClick={() => void save()}>
+        <button className="price-save" disabled={saving || restoring} onClick={() => void save()}>
           {saving ? t('priceSaving') : t('priceSave')}
+        </button>
+        <button className="price-restore" disabled={saving || restoring} onClick={() => void restore()}>
+          {restoring ? t('priceRestoring') : t('priceRestoreDefault')}
         </button>
         {error !== null && <span className="price-error">{error}</span>}
         <span className="price-edit-hint">{t('priceEditHint')}</span>

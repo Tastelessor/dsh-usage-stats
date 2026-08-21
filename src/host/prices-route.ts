@@ -22,6 +22,12 @@ export interface PricesDeps {
    * settings seam refuses the write; the handler answers that as a 400.
    */
   writePrices(currency: Currency, prices: Record<string, TieredModelPrice>): Promise<void>
+  /**
+   * Restore defaults for one currency: drop that currency's configured-price
+   * overlay so every catalog model falls back to the built-in official prices.
+   * Rejects (throw) when the settings seam refuses the write.
+   */
+  resetPrices(currency: Currency): Promise<void>
 }
 
 const CURRENCIES = new Set<Currency>(['CNY', 'USD'])
@@ -42,6 +48,25 @@ export function mergePrices(
   return models
 }
 
+/**
+ * Drop one currency's overlay from every configured model, preserving the
+ * other currency; a model left with neither currency is removed entirely. The
+ * result makes each catalog model fall back to its built-in default price.
+ */
+export function resetCurrencyPrices(
+  base: Record<string, ModelPricesByCurrency> | undefined,
+  currency: Currency,
+): Record<string, ModelPricesByCurrency> {
+  const key = currency === 'CNY' ? 'cny' : 'usd'
+  const models: Record<string, ModelPricesByCurrency> = {}
+  for (const [id, entry] of Object.entries(base ?? {})) {
+    const rest = { ...entry } as Record<string, unknown>
+    delete rest[key]
+    if (Object.keys(rest).length > 0) models[id] = rest as ModelPricesByCurrency
+  }
+  return models
+}
+
 function isModelPrice(value: unknown): value is ModelPrice {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
   const record = value as Record<string, unknown>
@@ -58,8 +83,18 @@ function isTieredModelPrice(value: unknown): value is TieredModelPrice {
   return isModelPrice(record.peak) && isModelPrice(record.offPeak)
 }
 
-/** Parse the {currency, prices} body; one discriminated outcome, no throws. */
-function parseBody(raw: string): { currency: Currency; prices: Record<string, TieredModelPrice> } | { error: string } {
+/** One validated write/restore request; a single discriminated outcome, no throws. */
+type PricesRequest =
+  | { action: 'set'; currency: Currency; prices: Record<string, TieredModelPrice> }
+  | { action: 'reset'; currency: Currency }
+  | { error: string }
+
+/**
+ * Parse the POST body. A missing/`set` action is the save path ({currency,
+ * prices}); `action: 'reset'` restores defaults for the currency (prices
+ * ignored). One discriminated outcome, no throws.
+ */
+function parseBody(raw: string): PricesRequest {
   let body: unknown
   try {
     body = JSON.parse(raw)
@@ -67,10 +102,13 @@ function parseBody(raw: string): { currency: Currency; prices: Record<string, Ti
     return { error: 'body must be valid JSON' }
   }
   if (typeof body !== 'object' || body === null || Array.isArray(body)) return { error: 'body must be an object' }
-  const record = body as { currency?: unknown; prices?: unknown }
+  const record = body as { action?: unknown; currency?: unknown; prices?: unknown }
   if (typeof record.currency !== 'string' || !CURRENCIES.has(record.currency as Currency)) {
     return { error: 'currency must be "CNY" or "USD"' }
   }
+  const action = record.action === undefined ? 'set' : record.action
+  if (action === 'reset') return { action: 'reset', currency: record.currency as Currency }
+  if (action !== 'set') return { error: 'action must be "set" or "reset"' }
   if (typeof record.prices !== 'object' || record.prices === null || Array.isArray(record.prices)) {
     return { error: 'prices must be an object of model id → price' }
   }
@@ -84,7 +122,7 @@ function parseBody(raw: string): { currency: Currency; prices: Record<string, Ti
       return { error: `invalid price for model "${id}": expected {peak, offPeak} or a flat price` }
     }
   }
-  return { currency: record.currency as Currency, prices }
+  return { action: 'set', currency: record.currency as Currency, prices }
 }
 
 /** Build the handler bound to one deps snapshot. */
@@ -107,7 +145,11 @@ export function createPricesHandler(deps: PricesDeps): (req: IncomingMessage, re
       return
     }
     try {
-      await deps.writePrices(parsed.currency, parsed.prices)
+      if (parsed.action === 'reset') {
+        await deps.resetPrices(parsed.currency)
+      } else {
+        await deps.writePrices(parsed.currency, parsed.prices)
+      }
     } catch (error) {
       res.writeHead(400, JSON_HEADERS)
       res.end(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }))

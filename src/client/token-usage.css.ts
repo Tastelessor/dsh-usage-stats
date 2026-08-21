@@ -44,6 +44,8 @@ export const css = `
 .price-actions { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
 .price-save { padding: 4px 12px; border: 1px solid var(--dsw-color-accent, #2563eb); border-radius: 6px; background: var(--dsw-color-accent, #2563eb); color: var(--dsw-color-text-inverse, #ffffff); cursor: pointer; }
 .price-save:disabled { opacity: 0.6; cursor: default; }
+.price-restore { padding: 4px 12px; border: 1px solid var(--dsw-color-border, #d0d7de); border-radius: 6px; background: var(--dsw-surface-bg, #ffffff); color: var(--dsw-color-text, #1f2328); cursor: pointer; }
+.price-restore:disabled { opacity: 0.6; cursor: default; }
 .price-error { font-size: 12px; color: var(--dsw-color-danger, #cf222e); }
 .price-edit-hint { font-size: 12px; color: var(--dsw-color-text-muted, #6e7781); }
 .price-hint { font-size: 12px; color: var(--dsw-color-text-muted, #6e7781); margin-top: 8px; }

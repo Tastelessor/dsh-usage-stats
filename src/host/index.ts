@@ -25,7 +25,7 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import { ConfigSchema, NS, resolveCurrency, resolvePriceTables, type Config } from './config.ts'
 import { UsageIndexer, type SessionSource } from './indexer.ts'
 import { createStatsHandler } from './stats-route.ts'
-import { createPricesHandler, mergePrices } from './prices-route.ts'
+import { createPricesHandler, mergePrices, resetCurrencyPrices } from './prices-route.ts'
 import type { Currency, TieredModelPrice } from '../shared/types.ts'
 
 export const name = 'dsh-token-usage'
@@ -69,6 +69,18 @@ export function apply(ctx: Context, config: Config): void {
     // Our own write invalidates the aggregation cache immediately; the
     // settings/updated listener would also do it, but being explicit here
     // keeps the next fetch correct even if the event fan-out is delayed.
+    cacheLatest = undefined
+  }
+
+  // Price reset "restore defaults": drop the currency's configured-price
+  // overlay so resolution falls back to the built-in official prices. Same
+  // settings seam as writePrices.
+  const resetPrices = async (currency: Currency): Promise<void> => {
+    const settings = ctx.get('settings') as SettingsProvider | undefined
+    if (settings === undefined) throw new Error('settings service is unavailable')
+    const models = resetCurrencyPrices(current().models, currency)
+    const op: SettingsPathOp = { op: 'set', path: ['models'], value: models }
+    await settings.mutate(NS, [op])
     cacheLatest = undefined
   }
 
@@ -124,7 +136,7 @@ export function apply(ctx: Context, config: Config): void {
       set: (payload) => { cacheLatest = { at: Date.now(), payload } },
     },
   })
-  const pricesHandler = createPricesHandler({ writePrices })
+  const pricesHandler = createPricesHandler({ writePrices, resetPrices })
 
   // One prefix route dispatches the two plugin-owned endpoints: the stats
   // aggregation (GET) and the price write-back (POST).
