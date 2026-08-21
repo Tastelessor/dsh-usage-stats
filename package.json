@@ -1,6 +1,6 @@
 {
   "name": "dsh-token-usage",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Token-usage statistics for the DeepSeek Harness settings UI: summary cards + 3-month heatmap of real token spend converted to official peak/off-peak prices (CNY/USD), incremental index",
   "license": "MIT",
   "repository": {
